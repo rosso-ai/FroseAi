@@ -1,0 +1,7 @@
+torch
+torchvision
+protobuf
+PyYAML
+grpcio
+grpcio-tools
+omegaconf
