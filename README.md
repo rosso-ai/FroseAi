@@ -1,7 +1,10 @@
-# ConLAi
+# FroseAi
 
 ## RUN
-それぞれの動作方法は apps 下をご確認ください   
+To run the CIFAR10 example, run the following command:
+```shell
+python run_cifar10.py conf/froseai_conf_cifar10.yml
+``` 
 
 ## ProtoBuf compile for gRPC
 ```shell
