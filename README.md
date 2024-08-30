@@ -1,4 +1,5 @@
 # FroseAi
+[FroseAi_logo](./docs/images/froseai_logo.png)
 
 ## RUN
 To run the CIFAR10 example, run the following command:
