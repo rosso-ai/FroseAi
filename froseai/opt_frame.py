@@ -11,6 +11,9 @@ from abc import ABCMeta, abstractmethod
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
 from .pb.froseai_pb2_grpc import FroseAiStub
 
+import websocket
+from websocket import create_connection
+
 
 class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
     def __init__(self, params, defaults, client_id: int, config_pass: str):
@@ -18,10 +21,13 @@ class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
         self._client_id = client_id
         self._round = 0
         self._conf = OmegaConf.load(config_pass)
+        """
         self._grpc_opts = [
             ("grpc.max_send_message_length", 1000 * 1024 * 1024),
             ("grpc.max_receive_message_length", 1000 * 1024 * 1024),
         ]
+        """
+        self._ws = create_connection(self.server_url)
         self._logger = getLogger("FroseAiOptimizer")
 
     @property
