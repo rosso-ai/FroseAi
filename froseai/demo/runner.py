@@ -11,7 +11,7 @@ from froseai import FroseAiServer, FroseAiOptimizer, FedDatasetsClassification
 
 formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=logging.INFO, format=formatter)
-logger = getLogger("FroseAi-CIFAR10")
+logger = getLogger("Frose-Runner")
 
 
 def _proc_run(config_path: str, client_id: int, model, dataset, device="cpu"):
@@ -48,19 +48,26 @@ def _proc_run(config_path: str, client_id: int, model, dataset, device="cpu"):
     logger.info("[Client:%4d]  Training Finished!!" % (client_id,))
 
 
-def main():
+def run():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("config_path", type=str, help="path of config file")
     args = arg_parser.parse_args()
     conf = OmegaConf.load(args.config_path)
 
-    train_data = datasets.CIFAR10(root=conf.data.data_cache_dir, train=True, download=True, transform=ToTensor())
-    valid_data = datasets.CIFAR10(root=conf.data.data_cache_dir, train=False, download=True, transform=ToTensor())
+    if conf.data.dataset == "CIFAR10":
+        train_data = datasets.CIFAR10(root=conf.data.data_cache_dir, train=True, download=True, transform=ToTensor())
+        valid_data = datasets.CIFAR10(root=conf.data.data_cache_dir, train=False, download=True, transform=ToTensor())
+    else:
+        raise Exception("Frose-Runner does not currently support such dataset")
+
     fed_datasets = FedDatasetsClassification(conf.common.client_num, conf.train.batch_size, conf.train.inner_loop,
                                              conf.data.partition_method, conf.data.partition_alpha,
                                              train_data, valid_data, 10)
 
-    model = models.resnet18()
+    if conf.model.model == "resnet18":
+        model = models.resnet18()
+    else:
+        raise Exception("Frose-Runner does not currently support such model")
 
     # Server Start
     server = FroseAiServer(args.config_path, model, test_data=fed_datasets.valid_data_loader, device="cuda")
@@ -84,6 +91,3 @@ def main():
 
     server.stop()
 
-
-if __name__ == "__main__":
-    main()
