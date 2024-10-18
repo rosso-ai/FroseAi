@@ -17,7 +17,7 @@ setup(
     author='Masahiko Hashimoto',
     entry_points={
         "console_scripts": [
-            "frose_run = froseai.demo.runner:run",
+            "froserun = froseai.demo.runner:run",
         ]
     },
     author_email='',
