@@ -7,14 +7,19 @@ def _requires_from_file():
 
 setup(
     name='froseai',
-    version='0.0.1',
+    version='0.0.2',
     packages=find_packages(),
     include_package_data=True,
     zip_safe=False,
     install_requires=_requires_from_file(),
     url='https://github.com/rosso-ai-dataanalytics/FroseAi/',
-    license='',
+    license='Apache License',
     author='Masahiko Hashimoto',
+    entry_points={
+        "console_scripts": [
+            "froserun = froseai.demo.runner:run",
+        ]
+    },
     author_email='',
     description=''
 )

@@ -41,10 +41,6 @@ class FroseAiGrpcGateway(FroseAiServicer):
     def Pull(self, request, context):
         status = 204
         messages = None
-        """
-        self._agg.check_received(request.src)
-        if not self._agg.snd_q[request.src].empty() and request.round < self._agg.round:
-        """
         if not self._agg.snd_q[request.src].empty():
             status = 200
             messages = self._agg.snd_q[request.src].get()
