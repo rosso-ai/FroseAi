@@ -4,6 +4,7 @@ common:
   random_seed: 0
   client_num: 4
   log_output_path: "./log"
+  device: "cuda"
 
 model:
   model: "resnet18"

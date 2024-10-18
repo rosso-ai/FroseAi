@@ -70,7 +70,7 @@ def run():
         raise Exception("Frose-Runner does not currently support such model")
 
     # Server Start
-    server = FroseAiServer(args.config_path, model, test_data=fed_datasets.valid_data_loader, device="cuda")
+    server = FroseAiServer(args.config_path, model, test_data=fed_datasets.valid_data_loader, device=conf.common.device)
     server.start()
 
     if get_start_method() == 'fork':
@@ -79,7 +79,7 @@ def run():
     clients = []
     for client_id in range(conf.common.client_num):
         client = Process(target=_proc_run,
-                         args=(args.config_path, client_id, model, fed_datasets.fed_dataset(client_id), "cuda",))
+                         args=(args.config_path, client_id, model, fed_datasets.fed_dataset(client_id), conf.common.device,))
 
         # client start
         client.start()
