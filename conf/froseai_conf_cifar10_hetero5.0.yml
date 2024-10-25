@@ -1,5 +1,5 @@
 common:
-  job_name: "fedavg_cifar10"
+  job_name: "fedavg_cifar10_hetero5.0"
   server_url: "localhost:9200"
   random_seed: 0
   client_num: 4
@@ -13,7 +13,7 @@ data:
   dataset: "CIFAR10"
   data_cache_dir: "./data"
   partition_method: "hetero"
-  partition_alpha: 1.0
+  partition_alpha: 5.0
 
 train:
   round: 30

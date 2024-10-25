@@ -57,8 +57,10 @@ class FedDatasetsClassification(FedDatasetsBase):
             total_num = n_data
             indices = np.random.permutation(total_num)
             batch_indices = np.array_split(indices, self._clients_num)
-            net_data_idx_map = {i: batch_indices[i] for i in range(self._clients_num)}
-
+            net_data_idx_map = {i: batch_indices[i].tolist() for i in range(self._clients_num)}
+            for i in range(self._clients_num):
+                self._logger.info("partition data homo CL=%d: datasize= %d / %d" %
+                                  (i, len(net_data_idx_map[i]), n_data))
         return net_data_idx_map
 
     def _build_datasets(self, batch_size: int, inner_loop: int, dataset: Dataset, indices: Dict) -> (Dict, Dict):
