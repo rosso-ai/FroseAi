@@ -1,6 +1,5 @@
 import torch
 import copy
-from typing import Dict
 from torch import nn
 from ..agg_frame import FroseAiAggFrame
 

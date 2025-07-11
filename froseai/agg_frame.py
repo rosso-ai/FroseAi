@@ -5,15 +5,16 @@ import csv
 from queue import Queue
 from omegaconf import OmegaConf
 from logging import getLogger
-from typing import Dict, Optional
+from typing import Dict
 from abc import ABCMeta, abstractmethod
 from datetime import datetime
 from threading import Thread
+from .context import FroseArguments
 
 
 class FroseAiAggFrame(metaclass=ABCMeta):
-    def __init__(self, config_pass: str, model, test_data=None, device="cpu"):
-        self._conf = OmegaConf.load(config_pass)
+    def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu"):
+        self._conf = conf
         self._device = device
         self._round = 0
         self._model = model
@@ -31,8 +32,8 @@ class FroseAiAggFrame(metaclass=ABCMeta):
             self._snd_q.append(Queue())
 
         dt_now = datetime.now()
-        job_name = self._conf.common.job_name + "_" + dt_now.strftime('%Y%m%d%H%M%S')
-        log_output_path = os.path.join(self._conf.common.log_output_path, job_name)
+        job_name = self._conf.repo_name + "_" + dt_now.strftime('%Y%m%d%H%M%S')
+        log_output_path = os.path.join(self._conf.log_output_path, job_name)
         os.makedirs(log_output_path, exist_ok=True)
         OmegaConf.save(self._conf, os.path.join(str(log_output_path), "config.yml"))
 
@@ -89,11 +90,11 @@ class FroseAiAggFrame(metaclass=ABCMeta):
 
     @property
     def client_num(self):
-        return self._conf.common.client_num
+        return self._conf.worker_num
 
     @property
     def round_num(self):
-        return self._conf.train.round
+        return self._conf.round
 
     @property
     def metrics(self):

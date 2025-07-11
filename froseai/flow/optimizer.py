@@ -4,11 +4,11 @@ from ..opt_frame import FroseAiOptFrame
 
 
 class FedAvg(FroseAiOptFrame):
-    def __init__(self, parameters, client_id: int, config_path: str,
+    def __init__(self, parameters, client_id: int, job_name: str, server_url: str,
                  lr=required, momentum=0, dampening=0, weight_decay=0, nesterov=False, train_data_num=0):
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening, weight_decay=weight_decay,
                         nesterov=nesterov, initial_lr=lr)
-        super(FedAvg, self).__init__(parameters, defaults, client_id, config_path)
+        super(FedAvg, self).__init__(parameters, defaults, client_id, job_name, server_url)
 
         self._train_data_num = train_data_num
 

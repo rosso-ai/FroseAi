@@ -3,7 +3,6 @@ import os
 import logging
 import argparse
 import torch.nn as nn
-from omegaconf import OmegaConf
 from torchvision import models
 from torchvision import datasets
 from torchvision.transforms import ToTensor
@@ -14,17 +13,18 @@ formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=logging.INFO, format=formatter)
 logger = getLogger("Frose-Runner")
 
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+from froseai import FroseAiServer, FedDatasetsClassification, FroseArguments, FroseAiOptimizer
 
-def _proc_run(config_path: str, client_id: int, model, dataset, device="cpu"):
-    from froseai import FroseAiOptimizer
-    conf = OmegaConf.load(config_path)
-    optimizer = FroseAiOptimizer(model.parameters(), client_id, config_path,
-                                 lr=conf.train.learning_rate, weight_decay=conf.train.weight_decay,
+
+def _proc_run(conf: FroseArguments, client_id: int, model, dataset, device="cpu"):
+    optimizer = FroseAiOptimizer(model.parameters(), client_id, conf.repo_name, conf.server_url,
+                                 lr=0.1, weight_decay=0.01,
                                  train_data_num=dataset["num"])
     optimizer.hello(model)
 
     criterion = nn.CrossEntropyLoss()
-    while optimizer.round <= conf.train.round:
+    while optimizer.round <= conf.round:
         logger.info("[Client:%4d]  Round-%d Start!!" % (client_id, optimizer.round))
         model.train().to(device)
         batch_loss = []
@@ -54,37 +54,27 @@ def main():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("config_path", type=str, help="path of config file")
     args = arg_parser.parse_args()
+    conf = FroseArguments.from_yml(args.config_path)
 
-    sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-    from froseai import FroseAiServer, FedDatasetsClassification
-    conf = OmegaConf.load(args.config_path)
+    train_data = datasets.CIFAR10(root=conf.data_cache_dir, train=True, download=True, transform=ToTensor())
+    valid_data = datasets.CIFAR10(root=conf.data_cache_dir, train=False, download=True, transform=ToTensor())
 
-    if conf.data.dataset == "CIFAR10":
-        train_data = datasets.CIFAR10(root=conf.data.data_cache_dir, train=True, download=True, transform=ToTensor())
-        valid_data = datasets.CIFAR10(root=conf.data.data_cache_dir, train=False, download=True, transform=ToTensor())
-    else:
-        raise Exception("Frose-Runner does not currently support such dataset")
-
-    fed_datasets = FedDatasetsClassification(conf.common.client_num, conf.train.batch_size, conf.train.inner_loop,
-                                             conf.data.partition_method, conf.data.partition_alpha,
+    fed_datasets = FedDatasetsClassification(conf.worker_num, conf.batch_size, conf.inner_loop,
+                                             conf.partition_method, conf.partition_alpha,
                                              train_data, valid_data, 10)
-
-    if conf.model.model == "resnet18":
-        model = models.resnet18()
-    else:
-        raise Exception("Frose-Runner does not currently support such model")
+    model = models.resnet18()
 
     # Server Start
-    server = FroseAiServer(args.config_path, model, test_data=fed_datasets.valid_data_loader, device=conf.common.device)
+    server = FroseAiServer(conf, model, test_data=fed_datasets.valid_data_loader, device=conf.device)
     server.start()
 
     if get_start_method() == 'fork':
         set_start_method('spawn', force=True)
 
     clients = []
-    for client_id in range(conf.common.client_num):
+    for client_id in range(conf.worker_num):
         client = Process(target=_proc_run,
-                         args=(args.config_path, client_id, model, fed_datasets.fed_dataset(client_id), conf.common.device,))
+                         args=(conf, client_id, model, fed_datasets.fed_dataset(client_id), conf.device,))
 
         # client start
         client.start()
