@@ -5,7 +5,6 @@ import torch
 from typing import Dict
 from torch import nn
 from torch.optim.optimizer import Optimizer
-from omegaconf import OmegaConf
 from logging import getLogger
 from abc import ABCMeta, abstractmethod
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
@@ -13,11 +12,12 @@ from .pb.froseai_pb2_grpc import FroseAiStub
 
 
 class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
-    def __init__(self, params, defaults, client_id: int, config_pass: str):
+    def __init__(self, params, defaults, client_id: int, job_name: str, server_url: str):
         super().__init__(params, defaults)
         self._client_id = client_id
         self._round = 0
-        self._conf = OmegaConf.load(config_pass)
+        self._job_name = job_name
+        self._server_url = server_url
         self._grpc_opts = [
             ("grpc.max_send_message_length", 1000 * 1024 * 1024),
             ("grpc.max_receive_message_length", 1000 * 1024 * 1024),
@@ -26,11 +26,11 @@ class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
 
     @property
     def job_name(self) -> str:
-        return self._conf.common.job_name
+        return self._job_name
 
     @property
     def server_url(self) -> str:
-        return self._conf.common.server_url
+        return self._server_url
 
     @property
     def client_id(self):
