@@ -1,3 +1,5 @@
+import sys
+import os
 import logging
 import argparse
 import torch.nn as nn
@@ -7,7 +9,6 @@ from torchvision import datasets
 from torchvision.transforms import ToTensor
 from logging import basicConfig, getLogger
 from multiprocessing import Process, set_start_method, get_start_method
-from froseai import FroseAiServer, FroseAiOptimizer, FedDatasetsClassification
 
 formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=logging.INFO, format=formatter)
@@ -15,6 +16,7 @@ logger = getLogger("Frose-Runner")
 
 
 def _proc_run(config_path: str, client_id: int, model, dataset, device="cpu"):
+    from froseai import FroseAiOptimizer
     conf = OmegaConf.load(config_path)
     optimizer = FroseAiOptimizer(model.parameters(), client_id, config_path,
                                  lr=conf.train.learning_rate, weight_decay=conf.train.weight_decay,
@@ -48,10 +50,13 @@ def _proc_run(config_path: str, client_id: int, model, dataset, device="cpu"):
     logger.info("[Client:%4d]  Training Finished!!" % (client_id,))
 
 
-def run():
+def main():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("config_path", type=str, help="path of config file")
     args = arg_parser.parse_args()
+
+    sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+    from froseai import FroseAiServer, FedDatasetsClassification
     conf = OmegaConf.load(args.config_path)
 
     if conf.data.dataset == "CIFAR10":
@@ -90,4 +95,8 @@ def run():
         client.join()
 
     server.stop()
+
+
+if __name__ == "__main__":
+    main()
 
