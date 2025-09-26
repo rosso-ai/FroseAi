@@ -1,16 +1,13 @@
-import os
-import json
 import pickle
-import csv
+import torch
+import copy
 from queue import Queue
-from omegaconf import OmegaConf
 from logging import getLogger
 from typing import Dict
 from abc import ABCMeta, abstractmethod
-from datetime import datetime
 from threading import Thread
-from .context import FroseArguments
-
+from ..context import FroseArguments
+from ..validator import FedValidator
 
 class FroseAiAggFrame(metaclass=ABCMeta):
     def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu"):
@@ -18,9 +15,11 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._device = device
         self._round = 0
         self._model = model
-        self._test_data = test_data
         self._rsp_messages = {"model": None}
-        self._metrics = {}
+
+        self._validator = None
+        if test_data is not None:
+            self._validator = FedValidator(conf, test_data)
 
         self._flag_client_uploaded_round = []
         self._aggregator = None
@@ -31,22 +30,8 @@ class FroseAiAggFrame(metaclass=ABCMeta):
             self._received.append({})
             self._snd_q.append(Queue())
 
-        dt_now = datetime.now()
-        job_name = self._conf.repo_name + "_" + dt_now.strftime('%Y%m%d%H%M%S')
-        log_output_path = os.path.join(self._conf.log_output_path, job_name)
-        os.makedirs(log_output_path, exist_ok=True)
-        OmegaConf.save(self._conf, os.path.join(str(log_output_path), "config.yml"))
-
-        file_name = os.path.join(str(log_output_path), "metrics.csv")
-        self._metrics_f = open(file_name, "w", encoding="utf-8")
-        self._metrics_writer = csv.writer(self._metrics_f)
-        self._log_no_header = True
-
         self._logger = getLogger("FroseAi-ServerAgg")
         self._logger.info("Initialize!!")
-
-    def __del__(self):
-        self._metrics_f.close()
 
     @property
     def model(self):
@@ -69,7 +54,6 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         for idx in range(self.client_num):
             if self._flag_client_uploaded_round[idx] < self._round:
                 return False
-
         return True
 
     @property
@@ -79,10 +63,6 @@ class FroseAiAggFrame(metaclass=ABCMeta):
     @round.setter
     def round(self, val):
         self._round = val
-
-    @property
-    def test_data(self):
-        return self._test_data
 
     @property
     def device(self):
@@ -98,23 +78,19 @@ class FroseAiAggFrame(metaclass=ABCMeta):
 
     @property
     def metrics(self):
-        return json.dumps(self._metrics)
+        return self._validator.metrics
 
     @abstractmethod
     def aggregate(self):
-        pass
-
-    @abstractmethod
-    def test(self):
         pass
 
     def push(self, client_id: int, message: Dict, round_cnt: int):
         def _aggregate():
             self.aggregate()
 
-            if self._test_data is not None:
-                self._metrics = self.test()
-                self._write_log()
+            if self._validator is not None:
+                self._validator.test(self.model, self.round, self.device)
+                self._validator.write_log(self.round)
 
             for idx in range(self.client_num):
                 self._snd_q[idx].put(pickle.dumps(self.messages))
@@ -129,21 +105,31 @@ class FroseAiAggFrame(metaclass=ABCMeta):
                 self._aggregator = Thread(target=_aggregate)
                 self._aggregator.start()
 
-    def _write_log(self):
-        metrics_key = ["round"]
-        metrics_val = [self._round]
-        for k, v in self._metrics.items():
-            metrics_key.append(k)
-            metrics_val.append(v)
-
-        if self._log_no_header:
-            self._metrics_writer.writerow(metrics_key)
-            self._log_no_header = False
-
-        self._metrics_writer.writerow(metrics_val)
-        self._metrics_f.flush()
-
     def clear_aggregator(self):
         if self._aggregator is not None:
             self._aggregator.join()
         self._aggregator = None
+
+
+class FedAvgAggregator(FroseAiAggFrame):
+    def aggregate(self):
+        sample_num = 0
+        for i in range(self.client_num):
+            sample_num += self._received[i]["sample_num"]
+
+        with torch.no_grad():
+            average_params = self.model.cpu().state_dict()
+            for i in range(self.client_num):
+
+                sample_rate = 1
+                if sample_num != 0:
+                    sample_rate = self._received[i]["sample_num"] / sample_num
+
+                for k in average_params.keys():
+                    if i == 0:
+                        average_params[k] = self._received[i]["model"][k] * sample_rate
+                    else:
+                        average_params[k] += self._received[i]["model"][k] * sample_rate
+
+            self.model.load_state_dict(average_params)
+            self.messages["model"] = copy.deepcopy(self.model).cpu().state_dict()

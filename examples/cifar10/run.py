@@ -14,13 +14,12 @@ basicConfig(level=logging.INFO, format=formatter)
 logger = getLogger("Frose-Runner")
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from froseai import FroseAiServer, FedDatasetsClassification, FroseArguments, FroseAiOptimizer
+from froseai import FroseAiServer, FedDatasetsClassification, FroseArguments, FedAvg
 
 
 def _proc_run(conf: FroseArguments, client_id: int, model, dataset, device="cpu"):
-    optimizer = FroseAiOptimizer(model.parameters(), client_id, conf.repo_name, conf.server_url,
-                                 lr=0.1, weight_decay=0.01,
-                                 train_data_num=dataset["num"])
+    optimizer = FedAvg(model.parameters(), client_id, conf.repo_name, conf.server_url,
+                       lr=0.1, weight_decay=0.01, train_data_num=dataset["num"])
     optimizer.hello(model)
 
     criterion = nn.CrossEntropyLoss()

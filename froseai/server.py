@@ -2,8 +2,7 @@ import grpc
 import pickle
 from logging import INFO, basicConfig, getLogger
 from concurrent import futures
-from omegaconf import OmegaConf
-from .flow import FroseAiAggregator
+from .aggregator import FedAvgAggregator
 from .context import FroseArguments
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
 from .pb.froseai_pb2_grpc import FroseAiServicer, add_FroseAiServicer_to_server
@@ -14,7 +13,7 @@ basicConfig(level=INFO, format=formatter)
 
 class FroseAiGrpcGateway(FroseAiServicer):
     def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu"):
-        self._agg = FroseAiAggregator(conf, model, test_data=test_data, device=device)
+        self._agg = FedAvgAggregator(conf, model, test_data=test_data, device=device)
         self._logger = getLogger("FroseAi-Gateway")
         self._logger.info("Initialize!!")
 

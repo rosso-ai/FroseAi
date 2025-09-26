@@ -7,8 +7,8 @@ from torch import nn
 from torch.optim.optimizer import Optimizer
 from logging import getLogger
 from abc import ABCMeta, abstractmethod
-from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
-from .pb.froseai_pb2_grpc import FroseAiStub
+from ..pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
+from ..pb.froseai_pb2_grpc import FroseAiStub
 
 
 class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):

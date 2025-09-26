@@ -1,6 +1,6 @@
 import torch
 from torch.optim.optimizer import required
-from ..opt_frame import FroseAiOptFrame
+from .opt_mixin import FroseAiOptFrame
 
 
 class FedAvg(FroseAiOptFrame):
