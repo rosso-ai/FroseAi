@@ -1,19 +1,13 @@
-import os
-import json
 import pickle
-import csv
 import torch
 import copy
-from torch import nn
 from queue import Queue
-from omegaconf import OmegaConf
 from logging import getLogger
 from typing import Dict
 from abc import ABCMeta, abstractmethod
-from datetime import datetime
 from threading import Thread
 from ..context import FroseArguments
-
+from ..validator import FedValidator
 
 class FroseAiAggFrame(metaclass=ABCMeta):
     def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu"):
@@ -21,9 +15,11 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._device = device
         self._round = 0
         self._model = model
-        self._test_data = test_data
         self._rsp_messages = {"model": None}
-        self._metrics = {}
+
+        self._validator = None
+        if test_data is not None:
+            self._validator = FedValidator(conf, test_data)
 
         self._flag_client_uploaded_round = []
         self._aggregator = None
@@ -34,22 +30,8 @@ class FroseAiAggFrame(metaclass=ABCMeta):
             self._received.append({})
             self._snd_q.append(Queue())
 
-        dt_now = datetime.now()
-        job_name = self._conf.repo_name + "_" + dt_now.strftime('%Y%m%d%H%M%S')
-        log_output_path = os.path.join(self._conf.log_output_path, job_name)
-        os.makedirs(log_output_path, exist_ok=True)
-        OmegaConf.save(self._conf, os.path.join(str(log_output_path), "config.yml"))
-
-        file_name = os.path.join(str(log_output_path), "metrics.csv")
-        self._metrics_f = open(file_name, "w", encoding="utf-8")
-        self._metrics_writer = csv.writer(self._metrics_f)
-        self._log_no_header = True
-
         self._logger = getLogger("FroseAi-ServerAgg")
         self._logger.info("Initialize!!")
-
-    def __del__(self):
-        self._metrics_f.close()
 
     @property
     def model(self):
@@ -72,7 +54,6 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         for idx in range(self.client_num):
             if self._flag_client_uploaded_round[idx] < self._round:
                 return False
-
         return True
 
     @property
@@ -82,10 +63,6 @@ class FroseAiAggFrame(metaclass=ABCMeta):
     @round.setter
     def round(self, val):
         self._round = val
-
-    @property
-    def test_data(self):
-        return self._test_data
 
     @property
     def device(self):
@@ -101,23 +78,19 @@ class FroseAiAggFrame(metaclass=ABCMeta):
 
     @property
     def metrics(self):
-        return json.dumps(self._metrics)
+        return self._validator.metrics
 
     @abstractmethod
     def aggregate(self):
-        pass
-
-    @abstractmethod
-    def test(self):
         pass
 
     def push(self, client_id: int, message: Dict, round_cnt: int):
         def _aggregate():
             self.aggregate()
 
-            if self._test_data is not None:
-                self._metrics = self.test()
-                self._write_log()
+            if self._validator is not None:
+                self._validator.test(self.model, self.round, self.device)
+                self._validator.write_log(self.round)
 
             for idx in range(self.client_num):
                 self._snd_q[idx].put(pickle.dumps(self.messages))
@@ -132,24 +105,11 @@ class FroseAiAggFrame(metaclass=ABCMeta):
                 self._aggregator = Thread(target=_aggregate)
                 self._aggregator.start()
 
-    def _write_log(self):
-        metrics_key = ["round"]
-        metrics_val = [self._round]
-        for k, v in self._metrics.items():
-            metrics_key.append(k)
-            metrics_val.append(v)
-
-        if self._log_no_header:
-            self._metrics_writer.writerow(metrics_key)
-            self._log_no_header = False
-
-        self._metrics_writer.writerow(metrics_val)
-        self._metrics_f.flush()
-
     def clear_aggregator(self):
         if self._aggregator is not None:
             self._aggregator.join()
         self._aggregator = None
+
 
 class FedAvgAggregator(FroseAiAggFrame):
     def aggregate(self):
@@ -173,44 +133,3 @@ class FedAvgAggregator(FroseAiAggFrame):
 
             self.model.load_state_dict(average_params)
             self.messages["model"] = copy.deepcopy(self.model).cpu().state_dict()
-
-    def test(self):
-        class_correct = list(0. for _ in range(10))
-        class_total = list(0. for _ in range(10))
-        criterion = nn.CrossEntropyLoss().to(self.device)
-
-        metrics = {"accuracy": 0., "loss": 0.}
-
-        loss_ary = []
-        with torch.no_grad():
-            total = 0
-            correct = 0
-            batch_loss = []
-            self.model.to(self.device)
-            for _, (x, target) in enumerate(self.test_data):
-                x = x.to(self.device)
-                target = target.to(self.device)
-                pred = self.model(x)
-                target = target.long()
-                loss = criterion(pred, target)  # pylint: disable=E1102
-
-                _, predicted = torch.max(pred, 1)
-                c = (predicted == target).squeeze()
-                for i in range(4):
-                    label = target[i]
-                    class_correct[label] += c[i].item()
-                    class_total[label] += 1
-
-                total += target.size(0)
-                correct += (predicted == target).sum().item()
-
-                batch_loss.append(loss.item())
-                loss_ary.append(sum(batch_loss) / len(batch_loss))
-
-            metrics["accuracy"] = correct / total
-            metrics["loss"] = sum(loss_ary) / len(loss_ary)
-
-            self._logger.info(" *** ROUND %d  AGGREGATE DONE  : %s"  % (self.round, str(metrics)))
-
-        return metrics
-
