@@ -1,11 +1,12 @@
 from .server import FroseAiServer
-from .flow import FroseAiAggregator, FroseAiOptimizer
+from .aggregator import FedAvgAggregator
+from .flow import FroseAiOptimizer
 from .datasets import FedDatasetsClassification
 from .context import FroseArguments
 
 __all__ = [
     "FroseAiServer",
-    "FroseAiAggregator",
+    "FedAvgAggregator",
     "FroseAiOptimizer",
     "FedDatasetsClassification",
     "FroseArguments",
