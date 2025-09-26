@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Dict
 from torch.utils.data import Dataset, DataLoader
-from ._datasets import FedDatasetsBase, FedInnerLoopSampler
+from .datasets_mixin import FedDatasetsBase, FedInnerLoopSampler
 
 
 class FedDatasetsClassification(FedDatasetsBase):
