@@ -9,6 +9,7 @@ from logging import getLogger
 from abc import ABCMeta, abstractmethod
 from ..pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
 from ..pb.froseai_pb2_grpc import FroseAiStub
+from peft import get_peft_model_state_dict, set_peft_model_state_dict
 
 
 class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
@@ -44,11 +45,11 @@ class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
     def hello(self, model: nn.modules):
         with grpc.insecure_channel(self.server_url, options=self._grpc_opts) as channel:
             stub = FroseAiStub(channel)
-            messages = pickle.dumps({"model": model.cpu().state_dict()})
+            messages = pickle.dumps({"model": {k: v.cpu() for k, v in get_peft_model_state_dict(model).items()}})
             rsp = stub.Hello(FroseAiParams(src=self._client_id, messages=messages))
 
             messages = pickle.loads(rsp.messages)
-            model.load_state_dict(messages["model"])
+            set_peft_model_state_dict(model, messages["model"])
             self._round = rsp.round
 
     @torch.no_grad()
@@ -56,7 +57,7 @@ class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
         with grpc.insecure_channel(self.server_url, options=self._grpc_opts) as channel:
             stub = FroseAiStub(channel)
             messages = self.snd_params()
-            messages["model"] = model.cpu().state_dict()
+            messages["model"] = {k: v.cpu() for k, v in get_peft_model_state_dict(model).items()}
             stub.Push(FroseAiParams(src=self.client_id, messages=pickle.dumps(messages), round=self._round))
 
             ret_code = 204
@@ -67,7 +68,7 @@ class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
 
                 if ret_code == 200:
                     messages = pickle.loads(rsp.messages)
-                    model.load_state_dict(messages["model"])
+                    set_peft_model_state_dict(model, messages["model"])
                     self.rcv_params(messages)
 
                 else:

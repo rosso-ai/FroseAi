@@ -1,6 +1,6 @@
 import pickle
 import torch
-import copy
+from peft import get_peft_model_state_dict, set_peft_model_state_dict
 from queue import Queue
 from logging import getLogger
 from typing import Dict
@@ -78,6 +78,9 @@ class FroseAiAggFrame(metaclass=ABCMeta):
 
     @property
     def metrics(self):
+        # test_data=None(サーバ側評価なし)のとき validator が無いので空を返す
+        if self._validator is None:
+            return "{}"
         return self._validator.metrics
 
     @abstractmethod
@@ -118,18 +121,23 @@ class FedAvgAggregator(FroseAiAggFrame):
             sample_num += self._received[i]["sample_num"]
 
         with torch.no_grad():
-            average_params = self.model.cpu().state_dict()
+            # 届いたアダプター(LoRA)のキーだけを回して平均する
+            keys = self._received[0]["model"].keys()
+            average_params = {}
             for i in range(self.client_num):
-
-                sample_rate = 1
+                sample_rate = 1 / self.client_num
                 if sample_num != 0:
                     sample_rate = self._received[i]["sample_num"] / sample_num
 
-                for k in average_params.keys():
+                for k in keys:
+                    contrib = self._received[i]["model"][k] * sample_rate
                     if i == 0:
-                        average_params[k] = self._received[i]["model"][k] * sample_rate
+                        average_params[k] = contrib
                     else:
-                        average_params[k] += self._received[i]["model"][k] * sample_rate
+                        average_params[k] += contrib
 
-            self.model.load_state_dict(average_params)
-            self.messages["model"] = copy.deepcopy(self.model).cpu().state_dict()
+            # 平均アダプターをサーバの器(グローバルモデル)にはめてから配る
+            set_peft_model_state_dict(self.model, average_params)
+            self.messages["model"] = {
+                k: v.cpu() for k, v in get_peft_model_state_dict(self.model).items()
+            }

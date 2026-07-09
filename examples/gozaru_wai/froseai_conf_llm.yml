@@ -1,0 +1,13 @@
+repo_name: gozaru_wai
+server_url: "localhost:9200"
+random_seed: 42
+device: cuda
+log_output_path: "./log"
+
+# train args
+round: 60          # 平均を挟む回数
+batch_size: 2
+inner_loop: 50    # 1ラウンドあたりのローカル学習ステップ
+
+# poc-mode
+worker_num: 2

@@ -6,6 +6,7 @@ from .aggregator import FedAvgAggregator
 from .context import FroseArguments
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
 from .pb.froseai_pb2_grpc import FroseAiServicer, add_FroseAiServicer_to_server
+from peft import get_peft_model_state_dict
 
 formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=INFO, format=formatter)
@@ -27,11 +28,11 @@ class FroseAiGrpcGateway(FroseAiServicer):
 
     def Hello(self, request, context):
         self._agg.round = 1
-        ret_model_state = self.model.cpu().state_dict()
-        if ret_model_state is None:
-            messages = request.messages
-        else:
-            messages = pickle.dumps({"model": ret_model_state})
+        # サーバの器(グローバルモデル)の初期アダプターを全クライアントに配る
+        init_adapter = {
+            k: v.cpu() for k, v in get_peft_model_state_dict(self.model).items()
+        }
+        messages = pickle.dumps({"model": init_adapter})
         return FroseAiParams(src=request.src, messages=messages, metrics=self.metrics, round=self._agg.round)
 
     def Push(self, request, context):
