@@ -2,6 +2,7 @@ import os
 import json
 import csv
 import torch
+from typing import Optional
 from torch import nn
 from omegaconf import OmegaConf
 from logging import getLogger
@@ -13,15 +14,15 @@ class FedValidator:
     def __init__(self, conf: FroseArguments, test_data):
         self._conf = conf
         self._test_data = test_data
-        self._metrics = {}
+        self._metrics = []
 
         dt_now = datetime.now()
-        job_name = self._conf.repo_name + "_" + dt_now.strftime('%Y%m%d%H%M%S')
-        log_output_path = os.path.join(self._conf.log_output_path, job_name)
-        os.makedirs(log_output_path, exist_ok=True)
-        OmegaConf.save(self._conf, os.path.join(str(log_output_path), "config.yml"))
+        job_name = self._conf.repo_name + "_" + dt_now.strftime('%Y%m%d_%H%M%S')
+        self._log_output_path = str(os.path.join(self._conf.log_output_path, job_name))
+        os.makedirs(self._log_output_path, exist_ok=True)
+        OmegaConf.save(self._conf, os.path.join(self._log_output_path, "config.yml"))
 
-        file_name = os.path.join(str(log_output_path), "metrics.csv")
+        file_name = os.path.join(self._log_output_path, "metrics.csv")
         self._metrics_f = open(file_name, "w", encoding="utf-8")
         self._metrics_writer = csv.writer(self._metrics_f)
         self._log_no_header = True
@@ -36,8 +37,16 @@ class FedValidator:
         return self._test_data
 
     @property
-    def metrics(self):
-        return json.dumps(self._metrics)
+    def log_path(self) -> str:
+        return self._log_output_path
+
+    @property
+    def metrics(self) -> list[dict]:
+        return self._metrics
+
+    @property
+    def last_metrics(self) -> Optional[str]:
+        return json.dumps(self._metrics[-1]) if len(self._metrics) > 0 else None
 
     def test(self, model: nn.Module, round_num: int, device="cpu"):
         class_correct = list(0. for _ in range(10))
@@ -76,14 +85,16 @@ class FedValidator:
             metrics["accuracy"] = correct / total
             metrics["loss"] = sum(loss_ary) / len(loss_ary)
 
-            self._logger.info(" *** ROUND %d  AGGREGATE DONE  : %s"  % (round_num, str(metrics)))
+        self._logger.info(" *** ROUND %d  AGGREGATE DONE  : %s"  % (round_num, str(metrics)))
+        self._write_log(round_num, metrics)
+        self._metrics.append(metrics)
 
         return metrics
 
-    def write_log(self, round_num: int):
+    def _write_log(self, round_num: int, metrics: dict):
         metrics_key = ["round"]
         metrics_val = [round_num]
-        for k, v in self._metrics.items():
+        for k, v in metrics.items():
             metrics_key.append(k)
             metrics_val.append(v)
 

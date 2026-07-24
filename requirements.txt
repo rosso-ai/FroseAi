@@ -6,5 +6,6 @@ grpcio
 grpcio-tools
 omegaconf
 fastapi
+matplotlib
 #websocket-client
 #pymongo

@@ -3,11 +3,12 @@ import torch
 import copy
 from queue import Queue
 from logging import getLogger
-from typing import Dict
+from typing import Dict, Optional
 from abc import ABCMeta, abstractmethod
 from threading import Thread
 from ..context import FroseArguments
 from ..validator import FedValidator
+
 
 class FroseAiAggFrame(metaclass=ABCMeta):
     def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu"):
@@ -17,9 +18,8 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._model = model
         self._rsp_messages = {"model": None}
 
-        self._validator = None
-        if test_data is not None:
-            self._validator = FedValidator(conf, test_data)
+        # いずれは外に出すが一旦Aggregator内で定義する
+        self._validator = FedValidator(conf, test_data)
 
         self._flag_client_uploaded_round = []
         self._aggregator = None
@@ -77,8 +77,16 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         return self._conf.round
 
     @property
-    def metrics(self):
+    def validator(self) -> FedValidator:
+        return self._validator
+
+    @property
+    def metrics(self) -> list[dict]:
         return self._validator.metrics
+
+    @property
+    def last_metrics(self) -> Optional[str]:
+        return self._validator.last_metrics
 
     @abstractmethod
     def aggregate(self):
@@ -87,10 +95,7 @@ class FroseAiAggFrame(metaclass=ABCMeta):
     def push(self, client_id: int, message: Dict, round_cnt: int):
         def _aggregate():
             self.aggregate()
-
-            if self._validator is not None:
-                self._validator.test(self.model, self.round, self.device)
-                self._validator.write_log(self.round)
+            self._validator.test(self.model, self.round, self.device)
 
             for idx in range(self.client_num):
                 self._snd_q[idx].put(pickle.dumps(self.messages))
