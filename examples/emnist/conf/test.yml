@@ -12,6 +12,6 @@ partition_method: "hetero"
 partition_alpha: 1.0
 
 # train
-round: 20
+round: 10
 batch_size: 100
 inner_loop: 100

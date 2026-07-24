@@ -12,18 +12,18 @@ basicConfig(level=INFO, format=formatter)
 
 
 class FroseAiGrpcGateway(FroseAiServicer):
-    def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu"):
-        self._agg = FedAvgAggregator(conf, model, test_data=test_data, device=device)
+    def __init__(self, agg: FedAvgAggregator):
+        self._agg = agg
         self._logger = getLogger("FroseAi-Gateway")
         self._logger.info("Initialize!!")
 
     @property
-    def model(self):
-        return self._agg.model
+    def agg(self) -> FedAvgAggregator:
+        return self._agg
 
     @property
-    def metrics(self):
-        return self._agg.metrics
+    def model(self):
+        return self._agg.model
 
     def Hello(self, request, context):
         self._agg.round = 1
@@ -32,7 +32,7 @@ class FroseAiGrpcGateway(FroseAiServicer):
             messages = request.messages
         else:
             messages = pickle.dumps({"model": ret_model_state})
-        return FroseAiParams(src=request.src, messages=messages, metrics=self.metrics, round=self._agg.round)
+        return FroseAiParams(src=request.src, messages=messages, metrics=self.agg.last_metrics, round=self._agg.round)
 
     def Push(self, request, context):
         self._agg.push(request.src, pickle.loads(request.messages), request.round)
@@ -46,23 +46,28 @@ class FroseAiGrpcGateway(FroseAiServicer):
             messages = self._agg.snd_q[request.src].get()
             self._agg.clear_aggregator()
 
-        return FroseAiParams(src=request.src, status=status, messages=messages, round=self._agg.round, metrics=self.metrics)
+        return FroseAiParams(src=request.src, status=status, messages=messages, round=self._agg.round, metrics=self.agg.last_metrics)
 
     def Status(self, request, context):
-        return FroseAiStatus(src=request.src, status=200, metrics=self.metrics)
+        return FroseAiStatus(src=request.src, status=200, metrics=self.agg.last_metrics)
 
 
 class FroseAiServer:
     def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu", max_workers=4):
         self._conf = conf
         self._logger = getLogger("FroseAi-Srv")
+        self._agg = FedAvgAggregator(conf, model, test_data=test_data, device=device)
 
         grpc_opts = [
             ("grpc.max_send_message_length", 1000 * 1024 * 1024),
             ("grpc.max_receive_message_length", 1000 * 1024 * 1024),
         ]
         self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers), options=grpc_opts, )
-        self._servicer = FroseAiGrpcGateway(conf, model, test_data=test_data, device=device)
+        self._servicer = FroseAiGrpcGateway(self._agg)
+
+    @property
+    def aggregator(self) -> FedAvgAggregator:
+        return self._agg
 
     def start(self):
         add_FroseAiServicer_to_server(self._servicer, self._server)
