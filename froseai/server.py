@@ -1,122 +1,260 @@
-import grpc
 import pickle
+
+import queue
+import time
+import threading
+import contextlib
+
 from logging import INFO, basicConfig, getLogger
-from concurrent import futures
 
-from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from .aggregator import FedAvgAggregator
 from .context import FroseArguments
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
-from .pb.froseai_pb2_grpc import FroseAiServicer, add_FroseAiServicer_to_server
 
 formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=INFO, format=formatter)
 
-
-class FroseAiGrpcGateway(FroseAiServicer):
+# サーバ側(Aggregator)⇔クライアント側(WebSocket)のゲートウェイクラス
+class FroseAiGateway:
+    # 初期化
     def __init__(self, agg: FedAvgAggregator):
+        # 引数を取得
         self._agg = agg
+        # ロガーを取得
         self._logger = getLogger("FroseAi-Gateway")
-        self._logger.info("Initialize!!")
+        # クライアント情報管理用の辞書を初期化
+        self._clients: dict[str, dict] = {}
+        self._logger.info("FroseAi-Gatewayを初期化しました")
 
+    # 読み取り用プロパティ
+    # 引数
     @property
     def agg(self) -> FedAvgAggregator:
         return self._agg
-
+    
+    # AIモデル
     @property
     def model(self):
         return self._agg.model
 
-    def Hello(self, request, context):
+    # 接続/切断処理
+    # サーバ⇔クライアント間の接続を新規作成
+    async def connect(self, websocket: WebSocket, client_id: str):
+        # 接続要求の受け入れ
+        await websocket.accept()
+        # クライアント情報を初期化して辞書に追加
+        self._clients[client_id] = {
+            "ws": websocket,
+            "round": 0,
+            "waiting": False
+        }
+        self._logger.info(f"クライアントを接続しました クライアントID: {client_id}")
+
+    # サーバ⇔クライアント間の接続が切断された際の処理
+    def disconnect(self, client_id: str):
+        # 辞書から該当のクライアント情報を削除
+        self._clients.pop(client_id, None)
+        self._logger.info(f"クライアントを切断しました クライアントID: {client_id}")
+
+    # クライアントからのリクエスト種別ごとの処理
+    # クライアント処理開始時の最初のハンドシェイク
+    def hello(self, req: FroseAiParams) -> FroseAiParams:
+        # ラウンド数を初期化
         self._agg.round = 1
+        # サーバの保持するAIモデル重みをCPUに配置
         ret_model_state = self.model.cpu().state_dict()
+        # AIモデルを配置できていれば重みをバイナリ化して返却メッセージに格納
+        # AIモデルを配置できていなければリクエストのメッセージをそのまま返却
         if ret_model_state is None:
-            messages = request.messages
+            messages = req.messages
         else:
             messages = pickle.dumps({"model": ret_model_state})
-        return FroseAiParams(src=request.src, messages=messages, metrics=self.agg.last_metrics, round=self._agg.round)
+        # レスポンスを生成
+        res = FroseAiParams()
+        res.src = req.src
+        res.messages = messages
+        res.round = self._agg.round
+        return res
 
-    def Push(self, request, context):
-        self._agg.push(request.src, pickle.loads(request.messages), request.round)
-        return FroseAiPiece(src=request.src, status=202)
+    # クライアントから送付された重みを受け取る
+    def push(self, req: FroseAiParams) -> FroseAiPiece:
+        # srcをint型に統一する
+        client_id = int(req.src) if isinstance(req.src, (int, str)) else req.src
+        # クライアントから送付された重みをバイナリから戻し、集約ロジックに登録
+        self._agg.push(req.src, pickle.loads(req.messages), req.round)
+        # レスポンスを生成
+        res = FroseAiPiece()
+        res.src = req.src
+        res.status = 202
+        return res
 
-    def Pull(self, request, context):
+    # 集約後の重みをクライアントが要求する
+    def pull(self, req: FroseAiParams) -> FroseAiParams:
+        # レスポンス初期化
         status = 204
-        messages = None
-        if not self._agg.snd_q[request.src].empty():
+        messages = b""
+        # client_idの型について、整数と文字列の両方で判定できるようにチェック
+        client_id = req.src
+        # int 型 / str 型の両方のキーで snd_q を探索
+        target_key = None
+        if client_id in self._agg.snd_q:
+            target_key = client_id
+        elif str(client_id) in self._agg.snd_q:
+            target_key = str(client_id)
+        elif client_id != "" and int(client_id) in self._agg.snd_q:
+            target_key = int(client_id)
+        # 送信キューに該当クライアント用のデータがあれば返却メッセージに格納
+        if target_key is not None and not self._agg.snd_q[target_key].empty():
             status = 200
-            messages = self._agg.snd_q[request.src].get()
-            self._agg.clear_aggregator()
+            messages = self._agg.snd_q[target_key].get()
+            
+            # 【重要】特定のクライアントが取得しただけで全体の集約状態を消去してしまわないよう、
+            # 全てのキューが空になった場合のみクリアを実行する
+            all_empty = all(q.empty() for q in self._agg.snd_q.values())
+            if all_empty:
+                self._agg.clear_aggregator()
+        # レスポンスを生成
+        res = FroseAiParams()
+        res.src = req.src
+        res.status = status
+        res.messages = messages if messages else b""
+        res.round = self._agg.round
+        return res
 
-        return FroseAiParams(src=request.src, status=status, messages=messages, round=self._agg.round, metrics=self.agg.last_metrics)
+    # ステータス確認をクライアントが要求する
+    def status(self, req: FroseAiParams) -> FroseAiStatus:
+        # レスポンスを生成
+        res = FroseAiStatus()
+        res.src = req.src
+        res.status = 200
+        return res
 
-    def Status(self, request, context):
-        return FroseAiStatus(src=request.src, status=200, metrics=self.agg.last_metrics)
+# インタフェースアプリケーションを作成
+app = FastAPI(title="FroseAI Server API & WebSocket", version="1.0.0")
 
+# CORSミドルウェアを追加
+# これを設定しないとセキュリティ上の理由からWebSocketがアクセスを拒否して403エラーとなる
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class FroseAiServer:
-    def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu", max_workers=4):
+# ゲートウェイはサーバ全体で使用するため、グローバル変数として定義
+# 初期化は後で実施するため、エラー防止用にNoneの可能性もあるように定義
+gateway: Optional[FroseAiGateway] = None
+
+# RESTエンドポイントの定義
+# GET /api/v1/status でサーバ状態を返却
+@app.get("/api/v1/status")
+def get_status():
+    # ゲートウェイ構築前の場合
+    if gateway is None:
+        return {"status": "初期化前"}
+    return {
+        "current_round": server.aggregator.round,
+        "status": "running"
+    }
+
+# WebSocketエンドポイントの定義
+# サーバ⇔クライアント間のエンドポイント
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str, op: str = "hello"):
+    # ゲートウェイが初期化されていなければエラーコード1011を返却
+    if gateway is None:
+        await websocket.close(code=1011)
+        return
+
+    # クライアントとの接続を新規作成
+    await gateway.connect(websocket, client_id)
+
+    try:
+        while True:
+            # バイナリデータの受信
+            data = await websocket.receive_bytes()
+            # バイナリデータを復元
+            req = FroseAiParams()
+            req.ParseFromString(data)
+            # opで処理を振り分け (Hello / Push / Pull / Status)
+            if op == "hello":
+                res = gateway.hello(req)
+                await websocket.send_bytes(res.SerializeToString())
+            elif op == "push":
+                res = gateway.push(req)
+                await websocket.send_bytes(res.SerializeToString())
+            elif op == "pull":
+                res = gateway.pull(req)
+                await websocket.send_bytes(res.SerializeToString())
+            elif op == "status":
+                res = gateway.status(req)
+                await websocket.send_bytes(res.SerializeToString())
+            else:
+                self._logger.warning(f"不正な操作種別です 操作種別: {op}")
+    except WebSocketDisconnect:
+        # クライアントとの接続が切れた場合、辞書からクライアント情報を削除
+        gateway.disconnect(client_id)
+
+# サーバ管理クラス
+class FroseAiServer(uvicorn.Server):
+    # 初期化
+    def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu", **kwargs):
+        # ゲートウェイ用のグローバル変数を定義
+        global gateway
+        # コンフィグを取得
         self._conf = conf
-        self._logger = getLogger("FroseAi-Srv")
+        # ロガーを取得
+        self._logger = getLogger("FroseAi-Server")
+        # 引数を取得
         self._agg = FedAvgAggregator(conf, model, test_data=test_data, device=device)
+        # ゲートウェイの初期化
+        gateway = FroseAiGateway(self._agg)
 
-        grpc_opts = [
-            ("grpc.max_send_message_length", 1000 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 1000 * 1024 * 1024),
-        ]
-        self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers), options=grpc_opts, )
-        self._servicer = FroseAiGrpcGateway(self._agg)
-
-    @property
-    def aggregator(self) -> FedAvgAggregator:
-        return self._agg
-
-    def start(self):
-        add_FroseAiServicer_to_server(self._servicer, self._server)
+        # コンフィグの内容からポート番号を抽出
         port_num = int(self._conf.server_url.split(":")[1])
-        port_str = '[::]:' + str(port_num)
-        self._server.add_insecure_port(port_str)
+        # AIモデル重みをやり取りできるよう、最大通信サイズを1GBに拡張
+        ws_max_size = 1000 * 1024 * 1024
+        # 各種設定をサーバ用のコンフィグオブジェクトに格納
+        config = uvicorn.Config(
+            app, 
+            host="0.0.0.0", 
+            port=port_num, 
+            ws_max_size=ws_max_size, 
+            access_log=False, 
+            **kwargs
+        )
+        # サーバを初期化
+        super().__init__(config)
 
-        self._server.start()
-        #self._server.wait_for_termination()
-        self._logger.info("gPRC Server START : %s" % (port_str,))
+    # シグナルハンドラの無効化
+    # サーバが別のバックグラウンドスレッドで動く際、
+    # Ctrl+CなどのOSシグナルを受け取れずエラーになるのを防ぐため、
+    # デフォルトの設定を無効化している
+    def install_signal_handlers(self):
+        pass
 
-    def stop(self):
-        self._server.stop(grace=1)
-
-# フロント⇒サーバ間のインタフェース
-# FastAPIのエンドポイントがサーバを参照できるよう関数化
-def create_front_if(server: FroseAiServer) -> FastAPI:
-
-    # FastAPIのライフサイクル管理
-    @asynccontextmanager
-    async def api_lifespan(app: FastAPI):
-        # FastAPI起動時にサーバも起動
-        server.start()
-        yield    # サーバ稼働
-        # FastAPI停止時にサーバも停止
-        server.stop()
-
-    # 上記ライフサイクルを組み込んでインスタンスを起動
-    app = FastAPI(
-        title = "FroseAI Front IF",
-        version = "1.0.0",
-        lifespan = api_lifespan
-    )
-
-    # RESTエンドポイントの定義
-    # GET /api/v1/status でサーバ状態を返却
-    @app.get("/api/v1/status")
-    def get_status():
-        return {
-            "current_round": server.aggregator.round,
-            "status": "running"
-        }
-
-    # インタフェース用のインスタンスを返却
-    return app
-
+    # 別スレッドでサーバを非同期起動
+    @contextlib.contextmanager
+    def run_in_thread(self):
+        # 別スレッドでサーバを非同期起動
+        thread = threading.Thread(target=self.run)
+        thread.start()
+        try:
+            # サーバが稼働するまで待機
+            while not self.started and thread.is_alive():
+                time.sleep(1e-3)
+            # サーバ稼働
+            yield
+        # 終了時の処理
+        finally:
+            # サーバに終了フラグを付ける
+            self.should_exit = True
+            # 完全に終了するまで待機
+            thread.join()

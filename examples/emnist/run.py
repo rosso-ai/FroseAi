@@ -21,7 +21,7 @@ basicConfig(level=logging.INFO, format=formatter)
 logger = getLogger("Frose-Runner")
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from froseai import FroseAiServer, FedDatasetsClassification, FroseArguments, FedAvg, FedValidator, create_front_if
+from froseai import FroseAiServer, FedDatasetsClassification, FroseArguments, FedAvg, FedValidator
 
 
 class LogisticRegression(nn.Module):
@@ -128,39 +128,22 @@ def main():
 
     # サーバの起動
     server = FroseAiServer(conf, model, test_data=fed_datasets.valid_data_loader, device=conf.device)
-    # フロント⇒サーバのインタフェースを生成
-    app = create_front_if(server)
-    # フロント⇒サーバのインタフェースを受け付けるWebサーバを起動
-    # サーバも自動的に起動される
-    config = uvicorn.Config(app, host="0.0.0.0", port=args.rest_port, log_level="info")
-    uvicorn_server = uvicorn.Server(config)
-    server_thread = threading.Thread(target=run_fastapi, args=(uvicorn_server,), daemon=True)
-    server_thread.start()
-    # 起動を少し待機
-    time.sleep(2)
+    # run_in_threadを用いて別スレッドでサーバを起動
+    with server.run_in_thread():
+        if get_start_method() == 'fork':
+            set_start_method('spawn', force=True)
+        clients = []
+        for client_id in range(conf.worker_num):
+            # クライアント起動
+            client = Process(target=_proc_run,
+                             args=(conf, client_id, model, fed_datasets.fed_dataset(client_id), conf.device,))
+            client.start()
+            clients.append(client)
+        # クライアントの停止待ち
+        for client in clients:
+            client.join()
 
-    if get_start_method() == 'fork':
-        set_start_method('spawn', force=True)
-
-    clients = []
-    for client_id in range(conf.worker_num):
-        # クライアント起動
-        client = Process(target=_proc_run,
-                         args=(conf, client_id, model, fed_datasets.fed_dataset(client_id), conf.device,))
-        client.start()
-        clients.append(client)
-
-    # クライアントの停止待ち
-    for client in clients:
-        client.join()
-
-    # Webサーバに終了フラグを付ける
-    # サーバも自動的に終了する
-    uvicorn_server.should_exit = True
-    # 完全に終了するまで待機
-    server_thread.join()
 #    plot_metrics(server.aggregator.validator)
-
 
 if __name__ == "__main__":
     main()

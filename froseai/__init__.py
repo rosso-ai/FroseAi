@@ -1,4 +1,4 @@
-from .server import FroseAiServer, create_front_if
+from .server import FroseAiServer
 from .aggregator import FedAvgAggregator
 from .optimizer import FedAvg
 from .datasets import FedDatasetsClassification
@@ -11,7 +11,6 @@ __all__ = [
     "FedAvg",
     "FedDatasetsClassification",
     "FroseArguments",
-    "FedValidator",
-    "create_front_if"
+    "FedValidator"
 ]
 
