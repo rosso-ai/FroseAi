@@ -2,6 +2,12 @@ import grpc
 import pickle
 from logging import INFO, basicConfig, getLogger
 from concurrent import futures
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
+import uvicorn
+
 from .aggregator import FedAvgAggregator
 from .context import FroseArguments
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
@@ -81,4 +87,36 @@ class FroseAiServer:
 
     def stop(self):
         self._server.stop(grace=1)
+
+# フロント⇒サーバ間のインタフェース
+# FastAPIのエンドポイントがサーバを参照できるよう関数化
+def create_front_if(server: FroseAiServer) -> FastAPI:
+
+    # FastAPIのライフサイクル管理
+    @asynccontextmanager
+    async def api_lifespan(app: FastAPI):
+        # FastAPI起動時にサーバも起動
+        server.start()
+        yield    # サーバ稼働
+        # FastAPI停止時にサーバも停止
+        server.stop()
+
+    # 上記ライフサイクルを組み込んでインスタンスを起動
+    app = FastAPI(
+        title = "FroseAI Front IF",
+        version = "1.0.0",
+        lifespan = api_lifespan
+    )
+
+    # RESTエンドポイントの定義
+    # GET /api/v1/status でサーバ状態を返却
+    @app.get("/api/v1/status")
+    def get_status():
+        return {
+            "current_round": server.aggregator.round,
+            "status": "running"
+        }
+
+    # インタフェース用のインスタンスを返却
+    return app
 
