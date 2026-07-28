@@ -318,6 +318,9 @@ def get_client_list():
     "/api/v1/clients/{client_id}",
     response_model = ResponseGetClientStatus,
     responses = {
+        status.HTTP_404_NOT_FOUND: {
+            "description": "指定のクライアントが不在"
+        },
         status.HTTP_503_SERVICE_UNAVAILABLE: {
             "description": "ゲートウェイまたはアグリゲータが未初期化"
         }
@@ -329,6 +332,12 @@ def get_client_status(client_id: str):
         raise HTTPException(
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
             detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
+    # 指定したクライアントが存在しない場合は 404 を返す
+    if client_id not in gateway._clients_info:
+        raise HTTPException(
+            status_code = status.HTTP_404_NOT_FOUND,
+            detail = "指定のクライアントが不在"
         )
     return {
         "client_id": client_id,
