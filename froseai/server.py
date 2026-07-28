@@ -53,6 +53,19 @@ class ResponseGetStatus(BaseModel):
 class ResponseGetHealthz(BaseModel):
     status: str
 
+# GET CLIENT LIST
+class ResponseGetClientList(BaseModel):
+    total_clients: int    # 総クライアント数
+    current_round: int    # 現在のラウンド数
+    clients: dict    # クライアントのリスト
+
+# GET CLIENT STATUS
+class ResponseGetClientStatus(BaseModel):
+    client_id: str    # クライアントの識別ID
+    status: str    # クライアントのステータス
+    last_seen: float    # 最終アクセス時刻
+    current_round: int    # 現在のラウンド数
+
 # サーバ側(Aggregator)⇔クライアント側(WebSocket)のゲートウェイクラス
 class FroseAiGateway:
     # 初期化
@@ -69,6 +82,8 @@ class FroseAiGateway:
         self._connected_clients : int = 0
         # 学習中のクライアント数
         self._uncomplete_clients : int = 0
+        # クライアント情報
+        self._clients_info = {}
         # 現在のステータス
         self._status : PhaseStatus = PhaseStatus.READY
         self._logger.info("FroseAi-Gatewayを初期化しました")
@@ -129,6 +144,11 @@ class FroseAiGateway:
         self._connected_clients = self._connected_clients + 1
         # 計算中のモデル数を1増やす
         self._uncomplete_clients = self._uncomplete_clients + 1
+        # クライアント情報の追加
+        self._clients_info[str(req.src)] = {
+            "status": "training",
+            "last_seen": time.time()
+        }
         # サーバの保持するAIモデル重みをCPUに配置
         ret_model_state = self.model.cpu().state_dict()
         # AIモデルを配置できていれば重みをバイナリ化して返却メッセージに格納
@@ -152,6 +172,11 @@ class FroseAiGateway:
         self._agg.push(req.src, pickle.loads(req.messages), req.round)
         # 計算中のモデル数を1減らす
         self._uncomplete_clients = self._uncomplete_clients - 1
+        # クライアント情報の更新
+        self._clients_info[str(req.src)] = {
+            "status": "complete",
+            "last_seen": time.time()
+        }
         # 重みをすべて受け取り済みならステータスを変更
         if self.agg.is_all_received:
             self._status = PhaseStatus.AGGREGATING
@@ -166,6 +191,11 @@ class FroseAiGateway:
         # レスポンス初期化
         status = 204
         messages = b""
+        # クライアント情報の更新
+        self._clients_info[str(req.src)] = {
+            "status": "complete",
+            "last_seen": time.time()
+        }
         # client_idの型について、整数と文字列の両方で判定できるようにチェック
         client_id = req.src
         # int 型 / str 型の両方のキーで snd_q を探索
@@ -182,6 +212,11 @@ class FroseAiGateway:
             messages = self._agg.snd_q[target_key].get()
             # 学習中のクライアント数を1増やす
             self._uncomplete_clients = self._uncomplete_clients + 1
+            # クライアント情報の更新
+            self._clients_info[str(req.src)] = {
+                "status": "training",
+                "last_seen": time.time()
+            }
             # ステータスを学習中に変更
             self._status = PhaseStatus.TRAINING
             
@@ -255,19 +290,51 @@ def get_status() -> ResponseGetStatus:
 
 # GET /api/v1/clients でクライアントの一覧を返却
 # いったんエンドポイントだけ作成
-@app.get("/api/v1/clients")
+@app.get(
+    "/api/v1/clients",
+    response_model = ResponseGetClientList,
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        }
+    }
+)
 def get_client_list():
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
     return {
-        "test_message": "GET CLIENT LIST"
+        "total_clients": gateway._agg.client_num,
+        "current_round": gateway._agg.round,
+        "clients": gateway._clients_info
     }
 
 # GET /api/v1/clients/{client_id} で個別のクライアント状態を返却
 # いったんエンドポイントだけ作成
-@app.get("/api/v1/clients/{client_id}")
+@app.get(
+    "/api/v1/clients/{client_id}",
+    response_model = ResponseGetClientStatus,
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        }
+    }
+)
 def get_client_status(client_id: str):
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
     return {
-        "test_message": "GET CLIENT STATUS",
-        "client_id": client_id
+        "client_id": client_id,
+        "status": gateway._clients_info[client_id]["status"],
+        "last_seen": gateway._clients_info[client_id]["last_seen"],
+        "current_round": gateway._agg.round
     }
 
 # GET /api/v1/config で現在適用されている設定値を返却
