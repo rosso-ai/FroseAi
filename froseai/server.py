@@ -9,9 +9,13 @@ from logging import INFO, basicConfig, getLogger
 
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+
+from enum import StrEnum
 
 from .aggregator import FedAvgAggregator
 from .context import FroseArguments
@@ -19,6 +23,28 @@ from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
 
 formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=INFO, format=formatter)
+
+# サーバのステータス状態の列挙クラス
+class PhaseStatus(StrEnum):
+    UNINITIALIZED = "uninitialized"    # サーバ起動前
+    READY = "ready"    # クライアント起動前
+    TRAINING = "training"    # クライアント学習中
+    AGGREGATING = "aggregating"    # 学習結果集約中
+    COMPLETED = "completed"    # 正常終了
+    ERROR = "error"    # エラー終了
+
+# GET STATUSのレスポンス用のクラスオブジェクト
+# データ検証の自動化のため、BaseModelを継承
+class ResponseGetStatus(BaseModel):
+    # 列挙クラスで取りうる値を定義
+    status: PhaseStatus    # ステータス
+    total_round: int    # 総ラウンド数
+    current_round: int    # 現在のラウンド数
+    total_clients: int    # 総クライアント数
+    complete_clients: int    # 学習結果を返したクライアント数
+    uptime_seconds: float    # 連続稼働時間(秒)
+    # 文字列またはNone、指定なしの場合はNone
+    latest_metrics: str | None = None    # 最新のメトリクス値
 
 # サーバ側(Aggregator)⇔クライアント側(WebSocket)のゲートウェイクラス
 class FroseAiGateway:
@@ -30,6 +56,14 @@ class FroseAiGateway:
         self._logger = getLogger("FroseAi-Gateway")
         # クライアント情報管理用の辞書を初期化
         self._clients: dict[str, dict] = {}
+        # 起動時刻を記録(UNIX時刻形式)
+        self._start_time: float = time.time()
+        # 接続済みのクライアント数
+        self._connected_clients : int = 0
+        # 学習中のクライアント数
+        self._uncomplete_clients : int = 0
+        # 現在のステータス
+        self._status : PhaseStatus = PhaseStatus.READY
         self._logger.info("FroseAi-Gatewayを初期化しました")
 
     # 読み取り用プロパティ
@@ -42,6 +76,21 @@ class FroseAiGateway:
     @property
     def model(self):
         return self._agg.model
+    
+    # ステータス
+    @property
+    def status(self):
+        return self._status
+    
+    # 学習が完了したクライアント数
+    @property
+    def complete_clients(self) -> int:
+        return self._connected_clients - self._uncomplete_clients
+    
+    # 稼働時間(秒)
+    @property
+    def uptime_seconds(self) -> float:
+        return time.time() - self._start_time
 
     # 接続/切断処理
     # サーバ⇔クライアント間の接続を新規作成
@@ -65,8 +114,14 @@ class FroseAiGateway:
     # クライアントからのリクエスト種別ごとの処理
     # クライアント処理開始時の最初のハンドシェイク
     def hello(self, req: FroseAiParams) -> FroseAiParams:
+        # ステータスを学習中に変更
+        self._status = PhaseStatus.TRAINING
         # ラウンド数を初期化
         self._agg.round = 1
+        # 接続済みのモデル数を1増やす
+        self._connected_clients = self._connected_clients + 1
+        # 計算中のモデル数を1増やす
+        self._uncomplete_clients = self._uncomplete_clients + 1
         # サーバの保持するAIモデル重みをCPUに配置
         ret_model_state = self.model.cpu().state_dict()
         # AIモデルを配置できていれば重みをバイナリ化して返却メッセージに格納
@@ -88,6 +143,11 @@ class FroseAiGateway:
         client_id = int(req.src) if isinstance(req.src, (int, str)) else req.src
         # クライアントから送付された重みをバイナリから戻し、集約ロジックに登録
         self._agg.push(req.src, pickle.loads(req.messages), req.round)
+        # 計算中のモデル数を1減らす
+        self._uncomplete_clients = self._uncomplete_clients - 1
+        # 重みをすべて受け取り済みならステータスを変更
+        if self.agg.is_all_received:
+            self._status = PhaseStatus.AGGREGATING
         # レスポンスを生成
         res = FroseAiPiece()
         res.src = req.src
@@ -113,6 +173,10 @@ class FroseAiGateway:
         if target_key is not None and not self._agg.snd_q[target_key].empty():
             status = 200
             messages = self._agg.snd_q[target_key].get()
+            # 学習中のクライアント数を1増やす
+            self._uncomplete_clients = self._uncomplete_clients + 1
+            # ステータスを学習中に変更
+            self._status = PhaseStatus.TRAINING
             
             # 【重要】特定のクライアントが取得しただけで全体の集約状態を消去してしまわないよう、
             # 全てのキューが空になった場合のみクリアを実行する
@@ -154,22 +218,32 @@ gateway: Optional[FroseAiGateway] = None
 
 # RESTエンドポイントの定義
 # GET /api/v1/status でサーバ状態を返却
-@app.get("/api/v1/status")
-def get_status():
-    # ゲートウェイ構築前の場合
-    if gateway is None:
-        return {"status": "初期化前"}
-    return {
-        "status": "running",
-        "total_round": 0,
-        "current_round": server.aggregator.round,
-        "total_clients": 0,
-        "complete_clients": 0,
-        "uptime": 0,
-        "latest_metrics": {
-            "accuracy": 0,
-            "loss": 0
+# レスポンスのフォーマットはResponseGetStatusクラスで定義
+@app.get(
+    "/api/v1/status",
+    response_model = ResponseGetStatus,
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
         }
+    }
+)
+def get_status() -> ResponseGetStatus:
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
+    
+    return {
+        "status": gateway._status,
+        "total_round": gateway._agg.round_num,
+        "current_round": gateway._agg.round,
+        "total_clients": gateway._agg.client_num,
+        "complete_clients": gateway.complete_clients,
+        "uptime_seconds": gateway.uptime_seconds,
+        "latest_metrics": gateway._agg.last_metrics
     }
 
 # GET /api/v1/clients でクライアントの一覧を返却
