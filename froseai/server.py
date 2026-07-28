@@ -5,13 +5,15 @@ import time
 import threading
 import contextlib
 
+import json
+
 from logging import INFO, basicConfig, getLogger
 
 from typing import Optional
 
 from pydantic import BaseModel
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status, Response
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -272,27 +274,86 @@ def get_config():
     }
 
 # GET /api/v1/model/latest で最新のAIモデル重みを返却
-# いったんエンドポイントだけ作成
 @app.get("/api/v1/model/latest")
 def get_model_latest():
+    print(gateway.model)
+    print(type(gateway.model))
     return {
-        "test_message": "GET MODEL LATEST"
+        "model": gateway.model
     }
 
 # GET /api/v1/metrics でメトリクスを返却
-# いったんエンドポイントだけ作成
-@app.get("/api/v1/metrics")
+@app.get(
+    "/api/v1/metrics",
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        }
+    }
+)
 def get_metrics():
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
     return {
-        "test_message": "GET METRICS"
+        "metrics": gateway._agg.last_metrics
     }
 
 # GET /metrics でメトリクスを返却(Prometheus用)
 # いったんエンドポイントだけ作成
-@app.get("/metrics")
+@app.get(
+    "/metrics",
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        }
+    }
+)
 def get_metrics_prom():
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
+    
+    # メトリクス(JSON)の取得
+    last_metrics_json = gateway._agg.last_metrics
+    print(last_metrics_json)
+    print(type(last_metrics_json))
+    # Prometheus用にメトリクスを変換
+    # メトリクスが存在しない(集約前)の場合、存在しない旨を返す
+    if not last_metrics_json:
+        return Response(
+            content = "# No metrics available yet\n",
+            media_type = "text/plain"
+        )
+    # JSON文字列を一旦辞書オブジェクトに変換
+    try:
+        metrics_dict = json.loads(last_metrics_json)
+    except json.JSONDecodeError:
+        return Response(
+            content = "# Error parsing metrics\n",
+            media_type = "text/plain"
+        )
+    # Prometheus用のフォーマットに組み立て
+    prom_lines = []
+    for key, val in metrics_dict.items():
+        metric_name = f"froseai_{key}"
+        prom_lines.append(f"# HELP {metric_name} Latest round {key}")
+        prom_lines.append(f"# TYPE {metric_name} gauge")
+        prom_lines.append(f"{metric_name} {val}")
+        prom_lines.append("")    # 空行
+    content = "\n".join(prom_lines)
+    
     return {
-        "test_message": "GET METRICS(Prometheus)"
+        Response(
+            content = content,
+            media_type = "text/plain"
+        )
     }
 
 # GET /healthz/live でヘルスチェック(生存確認,Kubernetes用)
