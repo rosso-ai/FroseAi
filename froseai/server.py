@@ -1,24 +1,22 @@
-import pickle
+""" FroseAi Federated Learning Server Module
+このモジュールは、連合学習における中央サーバの
+REST APIエンドポイント(フロントエンド⇒サーバ)及び
+WebSocket通信インタフェース(サーバ⇔クライアント)を提供するモジュールです。
+"""
 
-import queue
-import time
-import threading
 import contextlib
-
 import json
-
-from logging import INFO, basicConfig, getLogger
-
-from typing import Optional
-
-from pydantic import BaseModel
-
+import pickle
+import queue
+import threading
+import time
+import uvicorn
+from enum import StrEnum
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status, Response
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-
-from enum import StrEnum
-
+from logging import INFO, basicConfig, getLogger
+from pydantic import BaseModel
+from typing import Optional
 from .aggregator import FedAvgAggregator
 from .context import FroseArguments
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
