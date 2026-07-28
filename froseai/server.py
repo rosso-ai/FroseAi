@@ -530,7 +530,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, op: str = "he
                 res = gateway.status(req)
                 await websocket.send_bytes(res.SerializeToString())
             else:
-                self._logger.warning(f"不正な操作種別です 操作種別: {op}")
+                getLogger("FroseAi-Gateway").warning(f"不正な操作種別です 操作種別: {op}")
     except WebSocketDisconnect:
         # クライアントとの接続が切れた場合、辞書からクライアント情報を削除
         gateway.disconnect(client_id)
