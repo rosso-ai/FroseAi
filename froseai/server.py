@@ -266,11 +266,23 @@ def get_client_status(client_id: str):
     }
 
 # GET /api/v1/config で現在適用されている設定値を返却
-# いったんエンドポイントだけ作成
-@app.get("/api/v1/config")
+@app.get(
+    "/api/v1/config",
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        }
+    }
+)
 def get_config():
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
     return {
-        "test_message": "GET CONFIG"
+        "config": gateway._agg._conf
     }
 
 # GET /api/v1/model/latest で最新のAIモデル重みを返却
