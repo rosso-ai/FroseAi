@@ -169,7 +169,7 @@ class FroseAiGateway:
         # srcをint型に統一する
         client_id = int(req.src) if isinstance(req.src, (int, str)) else req.src
         # クライアントから送付された重みをバイナリから戻し、集約ロジックに登録
-        self._agg.push(req.src, pickle.loads(req.messages), req.round)
+        self._agg.push(client_id, pickle.loads(req.messages), req.round)
         # 計算中のモデル数を1減らす
         self._uncomplete_clients = self._uncomplete_clients - 1
         # クライアント情報の更新
