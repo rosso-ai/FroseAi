@@ -429,12 +429,10 @@ def get_metrics_prom():
         prom_lines.append("")    # 空行
     content = "\n".join(prom_lines)
     
-    return {
-        Response(
-            content = content,
-            media_type = "text/plain"
-        )
-    }
+    return Response(
+        content = content,
+        media_type = "text/plain"
+    )
 
 # GET /healthz/live でヘルスチェック(生存確認,Kubernetes用)
 # いったんエンドポイントだけ作成
