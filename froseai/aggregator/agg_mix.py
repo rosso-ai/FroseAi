@@ -24,11 +24,13 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._flag_client_uploaded_round = []
         self._aggregator = None
         self._received = []
-        self._snd_q = []
+        # 途中のクライアント増減など将来的な拡張性を意識して、
+        # キュー管理をリストから辞書型に変更
+        self._snd_q = {}
         for idx in range(self.client_num):
             self._flag_client_uploaded_round.append(self._round)
             self._received.append({})
-            self._snd_q.append(Queue())
+            self._snd_q[idx] = Queue()
 
         self._logger = getLogger("FroseAi-ServerAgg")
         self._logger.info("Initialize!!")

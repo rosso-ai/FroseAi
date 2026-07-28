@@ -2,7 +2,7 @@
 repo_name: "fedavg_cifar10_hetero1.0"
 server_url: "localhost:9200"
 random_seed: 0
-worker_num: 4
+worker_num: 2
 log_output_path: "./log"
 device: "cpu"
 
