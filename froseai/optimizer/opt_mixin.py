@@ -111,11 +111,7 @@ class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
             op = "pull" # サーバ側の分岐用の操作種別文字列
             
             # サーバ側へリクエストを送り、レスポンスを受け取る
-            print("リクエスト送付：PULL")
-            print(pull_req)
             rsp = self._send_and_recv(pull_req, op)
-            print("レスポンス受け取り：PULL")
-            print(rsp)
             ret_code = rsp.status
             self._round = rsp.round
 

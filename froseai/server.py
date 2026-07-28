@@ -160,8 +160,105 @@ def get_status():
     if gateway is None:
         return {"status": "初期化前"}
     return {
+        "status": "running",
+        "total_round": 0,
         "current_round": server.aggregator.round,
-        "status": "running"
+        "total_clients": 0,
+        "complete_clients": 0,
+        "uptime": 0,
+        "latest_metrics": {
+            "accuracy": 0,
+            "loss": 0
+        }
+    }
+
+# GET /api/v1/clients でクライアントの一覧を返却
+# いったんエンドポイントだけ作成
+@app.get("/api/v1/clients")
+def get_client_list():
+    return {
+        "test_message": "GET CLIENT LIST"
+    }
+
+# GET /api/v1/clients/{client_id} で個別のクライアント状態を返却
+# いったんエンドポイントだけ作成
+@app.get("/api/v1/clients/{client_id}")
+def get_client_status(client_id: str):
+    return {
+        "test_message": "GET CLIENT STATUS",
+        "client_id": client_id
+    }
+
+# GET /api/v1/config で現在適用されている設定値を返却
+# いったんエンドポイントだけ作成
+@app.get("/api/v1/config")
+def get_config():
+    return {
+        "test_message": "GET CONFIG"
+    }
+
+# GET /api/v1/model/latest で最新のAIモデル重みを返却
+# いったんエンドポイントだけ作成
+@app.get("/api/v1/model/latest")
+def get_model_latest():
+    return {
+        "test_message": "GET MODEL LATEST"
+    }
+
+# GET /api/v1/metrics でメトリクスを返却
+# いったんエンドポイントだけ作成
+@app.get("/api/v1/metrics")
+def get_metrics():
+    return {
+        "test_message": "GET METRICS"
+    }
+
+# GET /metrics でメトリクスを返却(Prometheus用)
+# いったんエンドポイントだけ作成
+@app.get("/metrics")
+def get_metrics_prom():
+    return {
+        "test_message": "GET METRICS(Prometheus)"
+    }
+
+# GET /healthz/live でヘルスチェック(生存確認,Kubernetes用)
+# いったんエンドポイントだけ作成
+@app.get("/healthz/live")
+def get_healthz_live():
+    return {
+        "test_message": "GET HEALTHZ LIVE"
+    }
+
+# GET /healthz/ready でヘルスチェック(準備完了確認,Kubernetes用)
+# いったんエンドポイントだけ作成
+@app.get("/healthz/ready")
+def get_healthz_ready():
+    return {
+        "test_message": "GET HEALTHZ READY"
+    }
+
+# POST /api/v1/session/start で連合学習を開始
+# いったんエンドポイントだけ作成
+@app.post("/api/v1/session/start")
+def post_start():
+    return {
+        "test_message": "POST START"
+    }
+
+# POST /api/v1/session/stop で連合学習を停止
+# いったんエンドポイントだけ作成
+@app.post("/api/v1/session/stop")
+def post_stop():
+    return {
+        "test_message": "POST STOP"
+    }
+
+# POST /api/v1/session/reset でラウンド数やキューなどを初期化
+# いったんエンドポイントだけ作成
+@app.post("/api/v1/session/reset")
+def post_reset():
+    return {
+        "test_message": "POST RESET"
     }
 
 # WebSocketエンドポイントの定義
