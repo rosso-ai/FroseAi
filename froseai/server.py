@@ -35,8 +35,9 @@ class PhaseStatus(StrEnum):
     COMPLETED = "completed"    # 正常終了
     ERROR = "error"    # エラー終了
 
-# GET STATUSのレスポンス用のクラスオブジェクト
+# RestAPI用のクラスオブジェクト
 # データ検証の自動化のため、BaseModelを継承
+# GET STATUS
 class ResponseGetStatus(BaseModel):
     # 列挙クラスで取りうる値を定義
     status: PhaseStatus    # ステータス
@@ -47,6 +48,10 @@ class ResponseGetStatus(BaseModel):
     uptime_seconds: float    # 連続稼働時間(秒)
     # 文字列またはNone、指定なしの場合はNone
     latest_metrics: str | None = None    # 最新のメトリクス値
+
+# GET HEALTHZ
+class ResponseGetHealthz(BaseModel):
+    status: str
 
 # サーバ側(Aggregator)⇔クライアント側(WebSocket)のゲートウェイクラス
 class FroseAiGateway:
@@ -370,18 +375,41 @@ def get_metrics_prom():
 
 # GET /healthz/live でヘルスチェック(生存確認,Kubernetes用)
 # いったんエンドポイントだけ作成
-@app.get("/healthz/live")
+@app.get(
+    "/healthz/live",
+    response_model = ResponseGetHealthz,
+    status_code = status.HTTP_200_OK,
+    summary = "Liveness Probe (生存確認)",
+    tags = ["Health Check"]
+)
 def get_healthz_live():
     return {
-        "test_message": "GET HEALTHZ LIVE"
+        "status": "alive"
     }
 
 # GET /healthz/ready でヘルスチェック(準備完了確認,Kubernetes用)
 # いったんエンドポイントだけ作成
-@app.get("/healthz/ready")
+@app.get(
+    "/healthz/ready",
+    response_model = ResponseGetHealthz,
+    status_code = status.HTTP_200_OK,
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        }
+    },
+    summary = "Readiness Probe (準備完了確認)",
+    tags = ["Health Check"]
+)
 def get_healthz_ready():
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
     return {
-        "test_message": "GET HEALTHZ READY"
+        "status": "ready"
     }
 
 # POST /api/v1/session/start で連合学習を開始
