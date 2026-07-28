@@ -360,8 +360,6 @@ def get_config():
 # GET /api/v1/model/latest で最新のAIモデル重みを返却
 @app.get("/api/v1/model/latest")
 def get_model_latest():
-    print(gateway.model)
-    print(type(gateway.model))
     return {
         "model": gateway.model
     }
@@ -406,8 +404,6 @@ def get_metrics_prom():
     
     # メトリクス(JSON)の取得
     last_metrics_json = gateway._agg.last_metrics
-    print(last_metrics_json)
-    print(type(last_metrics_json))
     # Prometheus用にメトリクスを変換
     # メトリクスが存在しない(集約前)の場合、存在しない旨を返す
     if not last_metrics_json:
