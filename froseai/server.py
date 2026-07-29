@@ -5,16 +5,19 @@ WebSocket通信インタフェース(サーバ⇔クライアント)を提供す
 """
 
 import contextlib
+import io
 import json
 import pickle
 import queue
 import threading
 import time
+import torch
 import uvicorn
 from enum import StrEnum
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status, Response
 from fastapi.middleware.cors import CORSMiddleware
 from logging import INFO, basicConfig, getLogger
+from multiprocessing import Process, set_start_method, get_start_method
 from pydantic import BaseModel
 from typing import Optional
 from .aggregator import FedAvgAggregator
@@ -239,6 +242,56 @@ class FroseAiGateway:
         res.status = 200
         return res
 
+# クライアント管理用のグローバルオブジェクト
+client_processes = []
+client_lock = threading.Lock()
+
+# クライアントプロセスの実行関数
+def _proc_run(conf: FroseArguments, client_id: int, model, dataset, device="cpu"):
+    from .optimizer import FedAvg
+    import torch.nn as nn
+    import logging
+    from logging import basicConfig, getLogger
+    formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
+    basicConfig(level=logging.INFO, format=formatter)
+    logger = getLogger("Frose-Client")
+    optimizer = FedAvg(
+        model.parameters(),
+        client_id,
+        conf.repo_name,
+        conf.server_url,
+        lr=0.1,
+        weight_decay=0.01,
+        train_data_num=dataset["num"]
+    )
+
+    optimizer.hello(model)
+
+    criterion = nn.CrossEntropyLoss()
+
+    while optimizer.round <= conf.round:
+        logger.info("[Client:%4d]  Round-%d Start!!" % (client_id, optimizer.round))
+        model.train().to(device)
+        batch_loss = []
+        for batch_idx, (x, labels) in enumerate(dataset["data"]):
+            x, labels = x.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            labels = labels.long()
+            log_probs = model(x)
+            loss = criterion(log_probs, labels)  # pylint: disable=E1102
+
+            loss.backward()
+            batch_loss.append(loss.item())
+            optimizer.step()
+
+        if len(batch_loss) > 0:
+            logger.info("[Client:%4d]    Loss: %.8f" % (client_id, sum(batch_loss) / len(batch_loss)))
+
+        optimizer.update(model)
+
+    logger.info("[Client:%4d]  Training Finished!!" % (client_id,))
+
 # インタフェースアプリケーションを作成
 app = FastAPI(title="FroseAI Server API & WebSocket", version="1.0.0")
 
@@ -365,11 +418,36 @@ def get_config():
     }
 
 # GET /api/v1/model/latest で最新のAIモデル重みを返却
-@app.get("/api/v1/model/latest")
-def get_model_latest():
-    return {
-        "model": gateway.model
+@app.get(
+    "/api/v1/model/latest",
+    summary = "メモリ上に保持されている最新のAIモデル重み(バイナリ形式)の取得",
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        }
     }
+)
+def get_model_latest():
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
+    
+    # 最新のモデル重みをメモリバッファに保存
+    buffer = io.BytesIO()
+    torch.save(gateway._agg._model.state_dict(), buffer)
+    buffer.seek(0)
+    
+    # 値をバイナリ形式で返却
+    return Response(
+        content = buffer.getvalue(),
+        media_type = "application/octet-stream",
+        headers = {
+            "Content-Disposition": "attachment; filename=latest_model.pt"
+        }
+    )
 
 # GET /api/v1/metrics でメトリクスを返却
 @app.get(
@@ -481,11 +559,61 @@ def get_healthz_ready():
     }
 
 # POST /api/v1/session/start で連合学習を開始
-# いったんエンドポイントだけ作成
-@app.post("/api/v1/session/start")
+@app.post(
+    "/api/v1/session/start",
+    summary = "連合学習セッションの開始",
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        },
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "連合学習セッションが実行中"
+        }
+    }
+)
 def post_start():
+    global client_processes
+    
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
+    
+    with client_lock:
+        # 実行中のセッションがある場合は 400 を返す
+        if any(p.is_alive() for p in client_processes):
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail = "連合学習セッションが実行中"
+            )
+        # プロセス開始方式の設定
+        if get_start_method() == 'fork':
+            set_start_method('spawn', force=True)
+        client_processes = []
+        conf = gateway._agg._conf
+        model = gateway._agg._model
+        fed_datasets = gateway._agg._datasets
+        # クライアントプロセスの起動
+        for client_id in range(conf.worker_num):
+            # クライアント起動
+            client = Process(
+                target = _proc_run,
+                args = (
+                    conf,
+                    client_id,
+                    model,
+                    fed_datasets.fed_dataset(client_id),
+                    conf.device,
+                )
+            )
+            client.start()
+            client_processes.append(client)
+    
     return {
-        "test_message": "POST START"
+        "status": "started",
+        "message": f"{conf.worker_num} 台のクライアントプロセスを起動しました"
     }
 
 # POST /api/v1/session/stop で連合学習を停止

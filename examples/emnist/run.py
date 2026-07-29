@@ -35,36 +35,36 @@ class LogisticRegression(nn.Module):
         return outputs
 
 
-def _proc_run(conf: FroseArguments, client_id: int, model, dataset, device="cpu"):
-    optimizer = FedAvg(model.parameters(), client_id, conf.repo_name, conf.server_url,
-                       lr=0.1, weight_decay=0.01, train_data_num=dataset["num"])
-
-    optimizer.hello(model)
-
-    criterion = nn.CrossEntropyLoss()
-
-    while optimizer.round <= conf.round:
-        logger.info("[Client:%4d]  Round-%d Start!!" % (client_id, optimizer.round))
-        model.train().to(device)
-        batch_loss = []
-        for batch_idx, (x, labels) in enumerate(dataset["data"]):
-            x, labels = x.to(device), labels.to(device)
-
-            optimizer.zero_grad()
-            labels = labels.long()
-            log_probs = model(x)
-            loss = criterion(log_probs, labels)  # pylint: disable=E1102
-
-            loss.backward()
-            batch_loss.append(loss.item())
-            optimizer.step()
-
-        if len(batch_loss) > 0:
-            logger.info("[Client:%4d]    Loss: %.8f" % (client_id, sum(batch_loss) / len(batch_loss)))
-
-        optimizer.update(model)
-
-    logger.info("[Client:%4d]  Training Finished!!" % (client_id,))
+#def _proc_run(conf: FroseArguments, client_id: int, model, dataset, device="cpu"):
+#    optimizer = FedAvg(model.parameters(), client_id, conf.repo_name, conf.server_url,
+#                       lr=0.1, weight_decay=0.01, train_data_num=dataset["num"])
+#
+#    optimizer.hello(model)
+#
+#    criterion = nn.CrossEntropyLoss()
+#
+#    while optimizer.round <= conf.round:
+#        logger.info("[Client:%4d]  Round-%d Start!!" % (client_id, optimizer.round))
+#        model.train().to(device)
+#        batch_loss = []
+#        for batch_idx, (x, labels) in enumerate(dataset["data"]):
+#            x, labels = x.to(device), labels.to(device)
+#
+#            optimizer.zero_grad()
+#            labels = labels.long()
+#            log_probs = model(x)
+#            loss = criterion(log_probs, labels)  # pylint: disable=E1102
+#
+#            loss.backward()
+#            batch_loss.append(loss.item())
+#            optimizer.step()
+#
+#        if len(batch_loss) > 0:
+#            logger.info("[Client:%4d]    Loss: %.8f" % (client_id, sum(batch_loss) / len(batch_loss)))
+#
+#        optimizer.update(model)
+#
+#    logger.info("[Client:%4d]  Training Finished!!" % (client_id,))
 
 
 #def plot_metrics(validator: FedValidator):
@@ -127,21 +127,26 @@ def main():
     model = LogisticRegression(input_dim=input_dim, output_dim=output_dim)
 
     # サーバの起動
-    server = FroseAiServer(conf, model, test_data=fed_datasets.valid_data_loader, device=conf.device)
-    # run_in_threadを用いて別スレッドでサーバを起動
-    with server.run_in_thread():
-        if get_start_method() == 'fork':
-            set_start_method('spawn', force=True)
-        clients = []
-        for client_id in range(conf.worker_num):
-            # クライアント起動
-            client = Process(target=_proc_run,
-                             args=(conf, client_id, model, fed_datasets.fed_dataset(client_id), conf.device,))
-            client.start()
-            clients.append(client)
-        # クライアントの停止待ち
-        for client in clients:
-            client.join()
+    server = FroseAiServer(conf, model, test_data=fed_datasets, device=conf.device)
+    
+    # サーバをメインスレッドで起動
+    logger.info("FroseAI Server を起動します...")
+    server.run()
+    
+#    # run_in_threadを用いて別スレッドでサーバを起動
+#    with server.run_in_thread():
+#        if get_start_method() == 'fork':
+#            set_start_method('spawn', force=True)
+#        clients = []
+#        for client_id in range(conf.worker_num):
+#            # クライアント起動
+#            client = Process(target=_proc_run,
+#                             args=(conf, client_id, model, fed_datasets.fed_dataset(client_id), conf.device,))
+#            client.start()
+#            clients.append(client)
+#        # クライアントの停止待ち
+#        for client in clients:
+#            client.join()
 
 #    plot_metrics(server.aggregator.validator)
 

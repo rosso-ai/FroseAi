@@ -17,9 +17,10 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._round = 0
         self._model = model
         self._rsp_messages = {"model": None}
+        self._datasets = test_data
 
         # いずれは外に出すが一旦Aggregator内で定義する
-        self._validator = FedValidator(conf, test_data)
+        self._validator = FedValidator(conf, test_data.valid_data_loader)
 
         self._flag_client_uploaded_round = []
         self._aggregator = None
