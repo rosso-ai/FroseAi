@@ -32,6 +32,9 @@ class FedValidator:
     def __del__(self):
         self._metrics_f.close()
 
+    def reset(self):
+        self._metrics = []
+
     @property
     def test_data(self):
         return self._test_data

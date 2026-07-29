@@ -89,6 +89,12 @@ class FroseAiGateway:
         self._status : PhaseStatus = PhaseStatus.READY
         self._logger.info("FroseAi-Gatewayを初期化しました")
 
+    # リセット
+    def reset(self):
+        self._agg.reset()
+        self._clients_info = {}
+        self._status = PhaseStatus.READY
+
     # 読み取り用プロパティ
     # 引数
     @property
@@ -677,11 +683,48 @@ def post_stop():
         )
 
 # POST /api/v1/session/reset でラウンド数やキューなどを初期化
-# いったんエンドポイントだけ作成
-@app.post("/api/v1/session/reset")
+@app.post(
+    "/api/v1/session/reset",
+    summary = "連合学習セッション情報の初期化",
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        },
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "連合学習セッションが実行中"
+        }
+    }
+)
 def post_reset():
+    global client_processes, gateway
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
+    
+    # 現在学習中の場合はエラー
+    current_status = gateway._status
+    if current_status in [PhaseStatus.TRAINING, PhaseStatus.AGGREGATING]:
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail = "連合学習セッションが実行中"
+        )
+    
+    # 残存プロセスの清掃
+    if client_processes:
+        for p in client_processes:
+            if p.is_alive():
+                p.terminate()
+                p.join()
+        client_processes = []
+    
+    # リセット実行
+    gateway.reset()
+    
     return {
-        "test_message": "POST RESET"
+        "message": "連合学習セッション情報の初期化に成功しました"
     }
 
 # WebSocketエンドポイントの定義

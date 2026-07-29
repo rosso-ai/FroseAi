@@ -36,6 +36,21 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._logger = getLogger("FroseAi-ServerAgg")
         self._logger.info("Initialize!!")
 
+    def reset(self):
+        # アグリゲータの学習状態を初期化
+        self._round = 0
+        self._rsp_messages = {"model": None}
+        self._received = []
+        for idx in range(self.client_num):
+            self._received.append({})
+            q = self._snd_q[idx]
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+        self._validator.reset()
+
     @property
     def model(self):
         return self._model
