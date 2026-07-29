@@ -7,48 +7,61 @@ from typing import Dict, Optional
 from abc import ABCMeta, abstractmethod
 from threading import Thread
 from ..context import FroseArguments
+from ..datasets import FedDatasetsClassification
 from ..validator import FedValidator
 
 
 class FroseAiAggFrame(metaclass=ABCMeta):
-    def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu"):
-        self._conf = conf
+    def __init__(self, model, train_data=None, valid_data=None, device="cpu"):
+        self._conf : FroseArguments | None = None
         self._device = device
         self._round = 0
         self._model = model
         self._rsp_messages = {"model": None}
-        self._datasets = test_data
-
-        # いずれは外に出すが一旦Aggregator内で定義する
-        self._validator = FedValidator(conf, test_data.valid_data_loader)
-
+        self._train_data = train_data
+        self._valid_data = valid_data
+        self._fed_data = None
         self._flag_client_uploaded_round = []
         self._aggregator = None
         self._received = []
+        self._snd_q = {}
+
+        self._logger = getLogger("FroseAi-ServerAgg")
+        self._logger.info("Initialize!!")
+
+    def start(self):
+        # コンフィグを後から読み込ませる形にしたため、
+        # 学習関連の初期化を一部移動
+        
+        # データセットの分割
+        fed_datasets = FedDatasetsClassification(
+            self._conf.worker_num,
+            self._conf.batch_size,
+            self._conf.inner_loop,
+            self._conf.partition_method,
+            self._conf.partition_alpha,
+            self._train_data,
+            self._valid_data,
+            10
+        )
+        self._fed_data = fed_datasets
+        # いずれは外に出すが一旦Aggregator内で定義する
+        self._validator = FedValidator(self._conf, fed_datasets.valid_data_loader)
         # 途中のクライアント増減など将来的な拡張性を意識して、
         # キュー管理をリストから辞書型に変更
+        self._received = []
         self._snd_q = {}
         for idx in range(self.client_num):
             self._flag_client_uploaded_round.append(self._round)
             self._received.append({})
             self._snd_q[idx] = Queue()
 
-        self._logger = getLogger("FroseAi-ServerAgg")
-        self._logger.info("Initialize!!")
-
     def reset(self):
         # アグリゲータの学習状態を初期化
         self._round = 0
         self._rsp_messages = {"model": None}
         self._received = []
-        for idx in range(self.client_num):
-            self._received.append({})
-            q = self._snd_q[idx]
-            while not q.empty():
-                try:
-                    q.get_nowait()
-                except queue.Empty:
-                    break
+        self._snd_q = {}
         self._validator.reset()
 
     @property

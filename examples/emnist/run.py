@@ -105,31 +105,29 @@ def run_fastapi(app: uvicorn.Server):
 # メイン処理
 def main():
     arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("config_path", type=str, help="path of config file")
+    #arg_parser.add_argument("config_path", type=str, help="path of config file")
     
     arg_parser.add_argument("--rest-port", type=int, default=8000, help="Port for REST API")
     
     args = arg_parser.parse_args()
-    conf = FroseArguments.from_yml(args.config_path)
+    #conf = FroseArguments.from_yml(args.config_path)
 
     # データセットの取得
     emnist_split='digits'
-    train_data = datasets.EMNIST(root=conf.data_cache_dir, split=emnist_split, train=True, download=True, transform=ToTensor())
-    valid_data = datasets.EMNIST(root=conf.data_cache_dir, split=emnist_split, train=False, download=True, transform=ToTensor())
-
-    # データセットの分割
-    fed_datasets = FedDatasetsClassification(conf.worker_num, conf.batch_size, conf.inner_loop,
-                                             conf.partition_method, conf.partition_alpha,
-                                             train_data, valid_data, 10)
+    train_data = datasets.EMNIST(root="./data", split=emnist_split, train=True, download=True, transform=ToTensor())
+    valid_data = datasets.EMNIST(root="./data", split=emnist_split, train=False, download=True, transform=ToTensor())
 
     input_dim = 1 * 28 * 28
     output_dim = 10
     model = LogisticRegression(input_dim=input_dim, output_dim=output_dim)
 
     # サーバの起動
-    server = FroseAiServer(conf, model, test_data=fed_datasets, device=conf.device)
+    server = FroseAiServer(model, train_data=train_data, valid_data=valid_data)
     
     # サーバをメインスレッドで起動
+    # コンテナはプロセスが終了すると停止してしまうため、
+    # 将来的なコンテナ化も見据えてフォアグラウンド方式を採用
+    # Uvicorn/FastAPIは標準でCtrl+C受信時に安全にクローズする仕組みがある
     logger.info("FroseAI Server を起動します...")
     server.run()
     

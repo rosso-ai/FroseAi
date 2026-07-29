@@ -67,6 +67,22 @@ class ResponseGetClientStatus(BaseModel):
     last_seen: float    # 最終アクセス時刻
     current_round: int    # 現在のラウンド数
 
+# POST SESSION START
+class RequestPostSessionStart(BaseModel):
+    repo_name: str = "fedavg_cifar10_hetero1.0"
+    server_url: str = "localhost:9200"
+    ws_max_size: int = 1048576000    # 1GB
+    random_seed: int = 0
+    device: str = "cpu"
+    log_output_path: str = "./log"
+    round: int = 1
+    batch_size: int = 1
+    inner_loop: int = 1
+    data_cache_dir: str = "./data"
+    partition_method: str = "hetero"
+    partition_alpha: float = 1.0
+    worker_num: int = 1
+
 # サーバ側(Aggregator)⇔クライアント側(WebSocket)のゲートウェイクラス
 class FroseAiGateway:
     # 初期化
@@ -577,8 +593,8 @@ def get_healthz_ready():
         }
     }
 )
-def post_start():
-    global client_processes
+def post_start(req: RequestPostSessionStart):
+    global client_processes, gateway
     
     # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
     if gateway is None or gateway._agg is None:
@@ -597,10 +613,28 @@ def post_start():
         # プロセス開始方式の設定
         if get_start_method() == 'fork':
             set_start_method('spawn', force=True)
+        # リクエストのJSONからパラメータを構築
+        conf = FroseArguments(
+            repo_name = req.repo_name,
+            server_url = req.server_url,
+            ws_max_size = req.ws_max_size,
+            random_seed = req.random_seed,
+            device = req.device,
+            log_output_path = req.log_output_path,
+            round = req.round,
+            batch_size = req.batch_size,
+            inner_loop = req.inner_loop,
+            data_cache_dir = req.data_cache_dir,
+            partition_method = req.partition_method,
+            partition_alpha = req.partition_alpha,
+            worker_num = req.worker_num
+        )
+        gateway._agg._conf = conf
+        gateway._agg.start()
+        
         client_processes = []
-        conf = gateway._agg._conf
         model = gateway._agg._model
-        fed_datasets = gateway._agg._datasets
+        fed_datasets = gateway._agg._fed_data
         # クライアントプロセスの起動
         for client_id in range(conf.worker_num):
             # クライアント起動
@@ -768,20 +802,18 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, op: str = "he
 # サーバ管理クラス
 class FroseAiServer(uvicorn.Server):
     # 初期化
-    def __init__(self, conf: FroseArguments, model, test_data=None, device="cpu", **kwargs):
+    def __init__(self, model, train_data=None, valid_data=None, device="cpu", **kwargs):
         # ゲートウェイ用のグローバル変数を定義
         global gateway
-        # コンフィグを取得
-        self._conf = conf
         # ロガーを取得
         self._logger = getLogger("FroseAi-Server")
         # 引数を取得
-        self._agg = FedAvgAggregator(conf, model, test_data=test_data, device=device)
+        self._agg = FedAvgAggregator(model, train_data=train_data, valid_data=valid_data, device=device)
         # ゲートウェイの初期化
         gateway = FroseAiGateway(self._agg)
 
         # コンフィグの内容からポート番号を抽出
-        port_num = int(self._conf.server_url.split(":")[1])
+        port_num = 9200
         # AIモデル重みをやり取りできるよう、最大通信サイズを1GBに拡張
         ws_max_size = 1000 * 1024 * 1024
         # 各種設定をサーバ用のコンフィグオブジェクトに格納
