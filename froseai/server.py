@@ -617,12 +617,64 @@ def post_start():
     }
 
 # POST /api/v1/session/stop で連合学習を停止
-# いったんエンドポイントだけ作成
-@app.post("/api/v1/session/stop")
-def post_stop():
-    return {
-        "test_message": "POST STOP"
+# 学習を早期終了したい場合ややり直したい場合、
+# システム異常などで緊急停止したい場合に使用
+@app.post(
+    "/api/v1/session/stop",
+    summary = "連合学習セッションの停止",
+    responses = {
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "ゲートウェイまたはアグリゲータが未初期化"
+        },
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "連合学習セッションが不在"
+        }
     }
+)
+def post_stop():
+    global client_processes, gateway
+    
+    # ゲートウェイまたはアグリゲータが未初期化の場合は 503 を返す
+    if gateway is None or gateway._agg is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail = "ゲートウェイまたはアグリゲータが未初期化"
+        )
+    
+    # 現在学習中でない場合はエラー
+    current_status = gateway._status
+    if current_status not in [PhaseStatus.TRAINING, PhaseStatus.AGGREGATING]:
+        raise HTTPException(
+            status_code = status.HTTP_400_BAD_REQUEST,
+            detail = "連合学習セッションが不在"
+        )
+    
+    # 停止中にエラーが起きる場合を考慮してtry-exceptを利用
+    try:
+        # 起動しているクライアントを1つずつ停止
+        stopped_clients_count = 0
+        if client_processes:
+            for p in client_processes:
+                if p.is_alive():
+                    p.terminate()
+                    p.join(timeout=2.0)
+                    if p.is_alive():
+                        p.kill()
+                    stopped_clients_count += 1
+        # サーバステータスを終了に更新
+        gateway._status = PhaseStatus.COMPLETED
+        return {
+            "message": "連合学習セッションの停止に成功しました",
+            "stoped_clients": stopped_clients_count,
+            "final_status": gateway.status
+        }
+    except Exception as e:
+        # エラー発生時はステータスをエラーに設定
+        gateway._status = PhaseStatus.ERROR
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail = f"連合学習セッションの停止に失敗: {str(e)}"
+        )
 
 # POST /api/v1/session/reset でラウンド数やキューなどを初期化
 # いったんエンドポイントだけ作成
