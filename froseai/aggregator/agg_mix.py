@@ -12,7 +12,19 @@ from ..validator import FedValidator
 
 
 class FroseAiAggFrame(metaclass=ABCMeta):
-    def __init__(self, model, train_data=None, valid_data=None, device="cpu"):
+    def __init__(
+        self,
+        model,
+        host = "localhost",
+        port = 8000,
+        ws_max_size = 1000 * 1024 * 1024,
+        log_dir = "./log",
+        data_dir = "./data",
+        train_data=None,
+        valid_data=None,
+        device="cpu",
+        **kwargs
+    ):
         self._conf : FroseArguments | None = None
         self._device = device
         self._round = 0
@@ -25,6 +37,9 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._aggregator = None
         self._received = []
         self._snd_q = {}
+        self._log_dir = log_dir
+        self._host = host
+        self._port = port
 
         self._logger = getLogger("FroseAi-ServerAgg")
         self._logger.info("Initialize!!")
@@ -46,7 +61,7 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         )
         self._fed_data = fed_datasets
         # いずれは外に出すが一旦Aggregator内で定義する
-        self._validator = FedValidator(self._conf, fed_datasets.valid_data_loader)
+        self._validator = FedValidator(self._conf, fed_datasets.valid_data_loader, self._log_dir)
         # 途中のクライアント増減など将来的な拡張性を意識して、
         # キュー管理をリストから辞書型に変更
         self._received = []

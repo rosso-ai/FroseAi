@@ -4,11 +4,23 @@ from .opt_mixin import FroseAiOptFrame
 
 
 class FedAvg(FroseAiOptFrame):
-    def __init__(self, parameters, client_id: int, job_name: str, server_url: str,
-                 lr=required, momentum=0, dampening=0, weight_decay=0, nesterov=False, train_data_num=0):
+    def __init__(
+        self,
+        parameters,
+        client_id: int,
+        job_name: str,
+        host: str,
+        port: int,
+        lr=required,
+        momentum=0,
+        dampening=0,
+        weight_decay=0,
+        nesterov=False,
+        train_data_num=0
+    ):
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening, weight_decay=weight_decay,
                         nesterov=nesterov, initial_lr=lr)
-        super(FedAvg, self).__init__(parameters, defaults, client_id, job_name, server_url)
+        super(FedAvg, self).__init__(parameters, defaults, client_id, job_name, host, port)
 
         self._train_data_num = train_data_num
 

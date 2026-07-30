@@ -70,15 +70,11 @@ class ResponseGetClientStatus(BaseModel):
 # POST SESSION START
 class RequestPostSessionStart(BaseModel):
     repo_name: str = "fedavg_cifar10_hetero1.0"
-    server_url: str = "localhost:9200"
-    ws_max_size: int = 1048576000    # 1GB
     random_seed: int = 0
     device: str = "cpu"
-    log_output_path: str = "./log"
     round: int = 1
     batch_size: int = 1
     inner_loop: int = 1
-    data_cache_dir: str = "./data"
     partition_method: str = "hetero"
     partition_alpha: float = 1.0
     worker_num: int = 1
@@ -269,7 +265,15 @@ client_processes = []
 client_lock = threading.Lock()
 
 # クライアントプロセスの実行関数
-def _proc_run(conf: FroseArguments, client_id: int, model, dataset, device="cpu"):
+def _proc_run(
+    conf: FroseArguments,
+    client_id: int,
+    model,
+    host = "localhost",
+    port = "8000",
+    dataset = None,
+    device = "cpu"
+):
     from .optimizer import FedAvg
     import torch.nn as nn
     import logging
@@ -278,13 +282,14 @@ def _proc_run(conf: FroseArguments, client_id: int, model, dataset, device="cpu"
     basicConfig(level=logging.INFO, format=formatter)
     logger = getLogger("Frose-Client")
     optimizer = FedAvg(
-        model.parameters(),
-        client_id,
-        conf.repo_name,
-        conf.server_url,
-        lr=0.1,
-        weight_decay=0.01,
-        train_data_num=dataset["num"]
+        parameters = model.parameters(),
+        client_id = client_id,
+        job_name = conf.repo_name,
+        host = host,
+        port = port,
+        lr = 0.1,
+        weight_decay = 0.01,
+        train_data_num = dataset["num"]
     )
 
     optimizer.hello(model)
@@ -616,15 +621,11 @@ def post_start(req: RequestPostSessionStart):
         # リクエストのJSONからパラメータを構築
         conf = FroseArguments(
             repo_name = req.repo_name,
-            server_url = req.server_url,
-            ws_max_size = req.ws_max_size,
             random_seed = req.random_seed,
             device = req.device,
-            log_output_path = req.log_output_path,
             round = req.round,
             batch_size = req.batch_size,
             inner_loop = req.inner_loop,
-            data_cache_dir = req.data_cache_dir,
             partition_method = req.partition_method,
             partition_alpha = req.partition_alpha,
             worker_num = req.worker_num
@@ -640,13 +641,15 @@ def post_start(req: RequestPostSessionStart):
             # クライアント起動
             client = Process(
                 target = _proc_run,
-                args = (
-                    conf,
-                    client_id,
-                    model,
-                    fed_datasets.fed_dataset(client_id),
-                    conf.device,
-                )
+                kwargs = {
+                    "conf": conf,
+                    "client_id": client_id,
+                    "model": model,
+                    "host": gateway._agg._host,
+                    "port": gateway._agg._port,
+                    "dataset": fed_datasets.fed_dataset(client_id),
+                    "device": conf.device
+                }
             )
             client.start()
             client_processes.append(client)
@@ -802,25 +805,43 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, op: str = "he
 # サーバ管理クラス
 class FroseAiServer(uvicorn.Server):
     # 初期化
-    def __init__(self, model, train_data=None, valid_data=None, device="cpu", **kwargs):
+    def __init__(
+        self,
+        model,
+        host = "localhost",
+        port = 8000,
+        ws_max_size = 1000 * 1024 * 1024,
+        log_dir = "./log",
+        data_dir = "./data",
+        train_data=None,
+        valid_data=None,
+        device="cpu",
+        **kwargs
+    ):
         # ゲートウェイ用のグローバル変数を定義
         global gateway
         # ロガーを取得
         self._logger = getLogger("FroseAi-Server")
         # 引数を取得
-        self._agg = FedAvgAggregator(model, train_data=train_data, valid_data=valid_data, device=device)
+        self._agg = FedAvgAggregator(
+            model = model,
+            host = host,
+            port = port,
+            ws_max_size = ws_max_size,
+            log_dir = log_dir,
+            data_dir = data_dir,
+            train_data = train_data,
+            valid_data = valid_data,
+            device = device
+        )
         # ゲートウェイの初期化
         gateway = FroseAiGateway(self._agg)
 
-        # コンフィグの内容からポート番号を抽出
-        port_num = 9200
-        # AIモデル重みをやり取りできるよう、最大通信サイズを1GBに拡張
-        ws_max_size = 1000 * 1024 * 1024
         # 各種設定をサーバ用のコンフィグオブジェクトに格納
         config = uvicorn.Config(
             app, 
-            host="0.0.0.0", 
-            port=port_num, 
+            host=host, 
+            port=port, 
             ws_max_size=ws_max_size, 
             access_log=False, 
             **kwargs

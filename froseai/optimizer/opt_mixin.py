@@ -16,18 +16,18 @@ from ..pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
 
 
 class FroseAiOptFrame(Optimizer, metaclass=ABCMeta):
-    def __init__(self, params, defaults, client_id: int, job_name: str, server_url: str):
+    def __init__(self, params, defaults, client_id: int, job_name: str, host: str, port: str):
         super().__init__(params, defaults)
         self._client_id = client_id
         self._round = 0
         self._job_name = job_name
-        self._server_url = server_url
+        self._server_url = f"{host}:{port}"
         
         self._logger = getLogger("FroseAiOptimizer")
         
         # WebSocket用のURL"ws://サーバURL/ws/クライアントID"を生成
         # サーバURLにもともとws://が付与されている場合はws://の付与処理はスキップする
-        url_base = server_url if server_url.startswith("ws://") else f"ws://{server_url}"
+        url_base = self._server_url if self._server_url.startswith("ws://") else f"ws://{self._server_url}"
         self._ws_url = f"{url_base}/ws/{self._client_id}"
 
     @property

@@ -11,14 +11,14 @@ from ..context import FroseArguments
 
 
 class FedValidator:
-    def __init__(self, conf: FroseArguments, test_data):
+    def __init__(self, conf: FroseArguments, test_data, log_dir):
         self._conf = conf
         self._test_data = test_data
         self._metrics = []
 
         dt_now = datetime.now()
         job_name = self._conf.repo_name + "_" + dt_now.strftime('%Y%m%d_%H%M%S')
-        self._log_output_path = str(os.path.join(self._conf.log_output_path, job_name))
+        self._log_output_path = str(os.path.join(log_dir, job_name))
         os.makedirs(self._log_output_path, exist_ok=True)
         OmegaConf.save(self._conf, os.path.join(self._log_output_path, "config.yml"))
 
