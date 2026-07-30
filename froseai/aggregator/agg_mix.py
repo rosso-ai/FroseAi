@@ -14,7 +14,6 @@ from ..validator import FedValidator
 class FroseAiAggFrame(metaclass=ABCMeta):
     def __init__(
         self,
-        model,
         host = "localhost",
         port = 8000,
         ws_max_size = 1000 * 1024 * 1024,
@@ -28,7 +27,7 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._conf : FroseArguments | None = None
         self._device = device
         self._round = 0
-        self._model = model
+        self._model = None
         self._rsp_messages = {"model": None}
         self._train_data = train_data
         self._valid_data = valid_data

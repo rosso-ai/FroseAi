@@ -23,9 +23,27 @@ from typing import Optional
 from .aggregator import FedAvgAggregator
 from .context import FroseArguments
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
+from torchvision import models
+import torch.nn as nn
 
 formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=INFO, format=formatter)
+
+class LogisticRegression(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(LogisticRegression, self).__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        outputs = self.linear(x)
+        return outputs
+
+# モデル生成用のファクトリ関数
+# torchvision.modelsに含まれていないモデルを利用したい場合はここに登録
+MODEL_REGISTRY = {
+    "logistic_regression": LogisticRegression,
+}
 
 # サーバのステータス状態の列挙クラス
 class PhaseStatus(StrEnum):
@@ -70,6 +88,8 @@ class ResponseGetClientStatus(BaseModel):
 # POST SESSION START
 class RequestPostSessionStart(BaseModel):
     repo_name: str = "fedavg_cifar10_hetero1.0"
+    model_name: str = "logistic_regression"
+    model_args: dict = {}
     random_seed: int = 0
     device: str = "cpu"
     round: int = 1
@@ -595,6 +615,9 @@ def get_healthz_ready():
         },
         status.HTTP_400_BAD_REQUEST: {
             "description": "連合学習セッションが実行中"
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "description": "指定のモデルが不在"
         }
     }
 )
@@ -630,6 +653,26 @@ def post_start(req: RequestPostSessionStart):
             partition_alpha = req.partition_alpha,
             worker_num = req.worker_num
         )
+        
+        # 指定したモデル名からモデルを検索
+        # 標準モデルの挙動をカスタマイズできるよう、
+        # モデルレジストリ側に名前がある場合はmodelsより優先する
+        model = None
+        if req.model_name in MODEL_REGISTRY:
+            model = MODEL_REGISTRY[req.model_name](**req.model_args)
+            if hasattr(models, req.model_name):
+                print(f"Warning: '{name}' は torchvision.models にも存在する名前です。自作モデルで上書きされます。")
+        elif hasattr(models, req.model_name):
+            model_fn = getattr(models, req.model_name)
+            model = model_fn(**req.model_args)
+        else:
+            raise HTTPException(
+                status_code = status.HTTP_404_NOT_FOUND,
+                detail = "指定のモデルが不在"
+            )
+        
+        gateway._agg._model = model
+        
         gateway._agg._conf = conf
         gateway._agg.start()
         
@@ -644,7 +687,7 @@ def post_start(req: RequestPostSessionStart):
                 kwargs = {
                     "conf": conf,
                     "client_id": client_id,
-                    "model": model,
+                    "model": gateway._agg._model,
                     "host": gateway._agg._host,
                     "port": gateway._agg._port,
                     "dataset": fed_datasets.fed_dataset(client_id),
@@ -807,7 +850,6 @@ class FroseAiServer(uvicorn.Server):
     # 初期化
     def __init__(
         self,
-        model,
         host = "localhost",
         port = 8000,
         ws_max_size = 1000 * 1024 * 1024,
@@ -824,7 +866,6 @@ class FroseAiServer(uvicorn.Server):
         self._logger = getLogger("FroseAi-Server")
         # 引数を取得
         self._agg = FedAvgAggregator(
-            model = model,
             host = host,
             port = port,
             ws_max_size = ws_max_size,
