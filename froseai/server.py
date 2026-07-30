@@ -25,6 +25,8 @@ from .context import FroseArguments
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
 from torchvision import models
 import torch.nn as nn
+from torchvision import datasets
+from torchvision.transforms import ToTensor
 
 formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=INFO, format=formatter)
@@ -89,7 +91,9 @@ class ResponseGetClientStatus(BaseModel):
 class RequestPostSessionStart(BaseModel):
     repo_name: str = "fedavg_cifar10_hetero1.0"
     model_name: str = "logistic_regression"
-    model_args: dict = {}
+    model_args: dict = {"input_dim": 784, "output_dim": 10}
+    dataset_name: str = "EMNIST"
+    dataset_args: dict = {"split": "digits"}
     random_seed: int = 0
     device: str = "cpu"
     round: int = 1
@@ -671,7 +675,34 @@ def post_start(req: RequestPostSessionStart):
                 detail = "指定のモデルが不在"
             )
         
+        # 指定したデータセット名からデータセットを検索
+        train_data = None
+        valid_data = None
+        if hasattr(datasets, req.dataset_name):
+            dataset_fn = getattr(datasets, req.dataset_name)
+            train_data = dataset_fn(
+                root = gateway._agg._data_dir,
+                train = True,
+                download = True,
+                transform = ToTensor(),
+                **req.dataset_args
+            )
+            valid_data = dataset_fn(
+                root = gateway._agg._data_dir,
+                train = False,
+                download = True,
+                transform = ToTensor(),
+                **req.dataset_args
+            )
+        else:
+            raise HTTPException(
+                status_code = status.HTTP_404_NOT_FOUND,
+                detail = "指定のデータセットが不在"
+            )
+        
         gateway._agg._model = model
+        gateway._agg._train_data = train_data
+        gateway._agg._valid_data = valid_data
         
         gateway._agg._conf = conf
         gateway._agg.start()
@@ -855,8 +886,6 @@ class FroseAiServer(uvicorn.Server):
         ws_max_size = 1000 * 1024 * 1024,
         log_dir = "./log",
         data_dir = "./data",
-        train_data=None,
-        valid_data=None,
         device="cpu",
         **kwargs
     ):
@@ -871,8 +900,6 @@ class FroseAiServer(uvicorn.Server):
             ws_max_size = ws_max_size,
             log_dir = log_dir,
             data_dir = data_dir,
-            train_data = train_data,
-            valid_data = valid_data,
             device = device
         )
         # ゲートウェイの初期化

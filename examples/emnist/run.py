@@ -51,9 +51,9 @@ def main():
     args = arg_parser.parse_args()
 
     # データセットの取得
-    emnist_split='digits'
-    train_data = datasets.EMNIST(root=args.data_dir, split=emnist_split, train=True, download=True, transform=ToTensor())
-    valid_data = datasets.EMNIST(root=args.data_dir, split=emnist_split, train=False, download=True, transform=ToTensor())
+    #emnist_split='digits'
+    #train_data = datasets.EMNIST(root=args.data_dir, split=emnist_split, train=True, download=True, transform=ToTensor())
+    #valid_data = datasets.EMNIST(root=args.data_dir, split=emnist_split, train=False, download=True, transform=ToTensor())
 
     #input_dim = 1 * 28 * 28
     #output_dim = 10
@@ -67,8 +67,8 @@ def main():
         ws_max_size = args.ws_max_size,
         log_dir = args.log_dir,
         data_dir = args.data_dir,
-        train_data = train_data,
-        valid_data = valid_data,
+        #train_data = train_data,
+        #valid_data = valid_data,
         device = "cpu"
     )
     

@@ -19,8 +19,6 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         ws_max_size = 1000 * 1024 * 1024,
         log_dir = "./log",
         data_dir = "./data",
-        train_data=None,
-        valid_data=None,
         device="cpu",
         **kwargs
     ):
@@ -29,14 +27,15 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._round = 0
         self._model = None
         self._rsp_messages = {"model": None}
-        self._train_data = train_data
-        self._valid_data = valid_data
+        self._train_data = None
+        self._valid_data = None
         self._fed_data = None
         self._flag_client_uploaded_round = []
         self._aggregator = None
         self._received = []
         self._snd_q = {}
         self._log_dir = log_dir
+        self._data_dir = data_dir
         self._host = host
         self._port = port
 
