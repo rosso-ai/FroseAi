@@ -616,9 +616,23 @@ def get_healthz_ready():
     "/api/v1/models"
 )
 def get_models():
-    all_models = set(models.list_models()) | set(MODEL_REGISTRY.keys())
+    tv_model_names = set(models.list_models())
+    custom_model_names = set(MODEL_REGISTRY.keys())
+    
+    all_models = []
+    for name in tv_model_names:
+        if name in custom_model_names:
+            continue
+        model_fn = models.get_model_builder(name)
+        params = list(inspect.signature(model_fn).parameters.keys())
+        all_models.append({"name": name, "type": "torchvision", "parameters": params})
+    for name, model_cls in MODEL_REGISTRY.items():
+        params = list(inspect.signature(model_cls).parameters.keys())
+        all_models.append({"name": name, "type": "custom", "parameters": params})
+    
     return {
-        "models": sorted(all_models)
+        "models": sorted(all_models, key=lambda x: x["name"]),
+        "document": "https://docs.pytorch.org/vision/stable/models.html"
     }
 
 # GET /api/v1/datasets で利用可能なデータセットのリストを返却
@@ -626,9 +640,16 @@ def get_models():
     "/api/v1/datasets"
 )
 def get_datasets():
-    all_datasets = getattr(datasets, "__all__", dir(datasets))
+    tv_dataset_names = getattr(datasets, "__all__", dir(datasets))
+    
+    all_datasets = []
+    for name in tv_dataset_names:
+        dataset_fn = getattr(datasets, name)
+        params = list(inspect.signature(dataset_fn).parameters.keys())
+        all_datasets.append({"name": name, "type": "torchvision", "parameters": params})
     return {
-        "datasets": all_datasets
+        "datasets": sorted(all_datasets, key=lambda x: x["name"]),
+        "document": "https://docs.pytorch.org/vision/stable/datasets.html"
     }
 
 # GET /api/v1/criterions で利用可能な損失関数のリストを返却
@@ -636,12 +657,19 @@ def get_datasets():
     "/api/v1/criterions"
 )
 def get_criterions():
-    loss_functions = [
+    tn_criterion_names = [
         name for name, obj in inspect.getmembers(nn, inspect.isclass)
         if name.endswith("Loss")
     ]
+    
+    all_criterions = []
+    for name in tn_criterion_names:
+        criterion_fn = getattr(nn, name)
+        params = list(inspect.signature(criterion_fn).parameters.keys())
+        all_criterions.append({"name": name, "type": "torch", "parameters": params})
     return {
-        "criterions": sorted(loss_functions)
+        "criterions": sorted(all_criterions, key=lambda x: x["name"]),
+        "document": "https://docs.pytorch.org/docs/stable/nn.html#loss-functions"
     }
 
 # POST /api/v1/session/start で連合学習を開始
