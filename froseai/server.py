@@ -13,6 +13,7 @@ import threading
 import time
 import torch
 import uvicorn
+import inspect
 from enum import StrEnum
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -608,6 +609,39 @@ def get_healthz_ready():
         )
     return {
         "status": "ready"
+    }
+
+# GET /api/v1/models で利用可能なモデルのリストを返却
+@app.get(
+    "/api/v1/models"
+)
+def get_models():
+    all_models = set(models.list_models()) | set(MODEL_REGISTRY.keys())
+    return {
+        "models": sorted(all_models)
+    }
+
+# GET /api/v1/datasets で利用可能なデータセットのリストを返却
+@app.get(
+    "/api/v1/datasets"
+)
+def get_datasets():
+    all_datasets = getattr(datasets, "__all__", dir(datasets))
+    return {
+        "datasets": all_datasets
+    }
+
+# GET /api/v1/criterions で利用可能な損失関数のリストを返却
+@app.get(
+    "/api/v1/criterions"
+)
+def get_criterions():
+    loss_functions = [
+        name for name, obj in inspect.getmembers(nn, inspect.isclass)
+        if name.endswith("Loss")
+    ]
+    return {
+        "criterions": sorted(loss_functions)
     }
 
 # POST /api/v1/session/start で連合学習を開始
