@@ -30,6 +30,7 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._train_data = None
         self._valid_data = None
         self._fed_data = None
+        self._criterion = None
         self._flag_client_uploaded_round = []
         self._aggregator = None
         self._received = []
@@ -59,7 +60,7 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         )
         self._fed_data = fed_datasets
         # いずれは外に出すが一旦Aggregator内で定義する
-        self._validator = FedValidator(self._conf, fed_datasets.valid_data_loader, self._log_dir)
+        self._validator = FedValidator(self._conf, fed_datasets.valid_data_loader, self._log_dir, self._criterion)
         # 途中のクライアント増減など将来的な拡張性を意識して、
         # キュー管理をリストから辞書型に変更
         self._received = []

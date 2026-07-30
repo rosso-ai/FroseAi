@@ -11,10 +11,11 @@ from ..context import FroseArguments
 
 
 class FedValidator:
-    def __init__(self, conf: FroseArguments, test_data, log_dir):
+    def __init__(self, conf: FroseArguments, test_data, log_dir, criterion):
         self._conf = conf
         self._test_data = test_data
         self._metrics = []
+        self._criterion = criterion
 
         dt_now = datetime.now()
         job_name = self._conf.repo_name + "_" + dt_now.strftime('%Y%m%d_%H%M%S')
@@ -54,7 +55,7 @@ class FedValidator:
     def test(self, model: nn.Module, round_num: int, device="cpu"):
         class_correct = list(0. for _ in range(10))
         class_total = list(0. for _ in range(10))
-        criterion = nn.CrossEntropyLoss()
+        criterion = self._criterion
 
         metrics = {"accuracy": 0., "loss": 0.}
 

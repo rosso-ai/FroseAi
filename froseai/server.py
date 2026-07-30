@@ -94,10 +94,12 @@ class RequestPostSessionStart(BaseModel):
     model_args: dict = {"input_dim": 784, "output_dim": 10}
     dataset_name: str = "EMNIST"
     dataset_args: dict = {"split": "digits"}
+    criterion_name: str = "CrossEntropyLoss"
+    criterion_args: dict = {}
     random_seed: int = 0
     device: str = "cpu"
     round: int = 1
-    batch_size: int = 1
+    batch_size: int = 100
     inner_loop: int = 1
     partition_method: str = "hetero"
     partition_alpha: float = 1.0
@@ -296,6 +298,7 @@ def _proc_run(
     host = "localhost",
     port = "8000",
     dataset = None,
+    criterion = None,
     device = "cpu"
 ):
     from .optimizer import FedAvg
@@ -317,8 +320,6 @@ def _proc_run(
     )
 
     optimizer.hello(model)
-
-    criterion = nn.CrossEntropyLoss()
 
     while optimizer.round <= conf.round:
         logger.info("[Client:%4d]  Round-%d Start!!" % (client_id, optimizer.round))
@@ -700,7 +701,19 @@ def post_start(req: RequestPostSessionStart):
                 detail = "指定のデータセットが不在"
             )
         
+        # 指定した評価関数名から評価関数を検索
+        criterion = None
+        if hasattr(nn, req.criterion_name):
+            criterion_fn = getattr(nn, req.criterion_name)
+            criterion = criterion_fn(**req.criterion_args)
+        else:
+            raise HTTPException(
+                status_code = status.HTTP_404_NOT_FOUND,
+                detail = "指定の評価関数が不在"
+            )
+        
         gateway._agg._model = model
+        gateway._agg._criterion = criterion
         gateway._agg._train_data = train_data
         gateway._agg._valid_data = valid_data
         
@@ -722,6 +735,7 @@ def post_start(req: RequestPostSessionStart):
                     "host": gateway._agg._host,
                     "port": gateway._agg._port,
                     "dataset": fed_datasets.fed_dataset(client_id),
+                    "criterion": gateway._agg._criterion,
                     "device": conf.device
                 }
             )
