@@ -1,0 +1,46 @@
+# 現代のPython標準に合わせてsetup.py、requirements.txtの代わりにpyproject.tomlを採用
+# 開発用のプロジェクトマネージャとしては処理が高速で記法がPython標準となるuvを採用
+# pip install uv、uv syncをプロジェクトルートで実行することでuv run python -m froseaiで起動可能
+[build-system]
+requires = ["hatchling"]    # ビルドツールとしてhatchlingを使用、インストールの際に自動でダウンロードされる
+build-backend = "hatchling.build"    # 実際にビルドを行うモジュールはhatchling.buildを使用
+
+[project]
+name = "froseai"
+version = "0.0.2"
+description = ""
+readme = "README.md"
+requires-python = ">=3.10"    # PyTorchは現在Python3.10以降を必要としている
+license = { text = "Apache License" }
+authors = [
+    { name = "Masahiko Hashimoto", email = "" }
+]
+urls = { Repository = "https://github.com/rosso-ai-dataanalytics/FroseAi/" }
+
+# requirements.txt から移植した依存ライブラリ
+dependencies = [
+    "torch",
+    "torchvision",
+    "protobuf",
+    "pyyaml",
+    "grpcio",
+    "grpcio-tools",
+    "omegaconf",
+    "fastapi",
+    "matplotlib",
+]
+
+# setup.py の entry_points (console_scripts) を移植
+[project.scripts]
+froserun = "froseai.demo.runner:run"
+
+# src レイアウトを自動検出するための設定
+[tool.hatch.build.targets.wheel]
+packages = ["src/froseai"]
+
+# setup.pyの以下2行はデフォルトで対応しているため記載不要
+# packages=find_packages(),
+# include_package_data=True,
+# setup.pyの以下について、Pythonの配布形式は現在Wheel形式が世界的な標準となっているため、zip圧縮の概念自体が不要
+# zip_safe=False,
+

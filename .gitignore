@@ -159,3 +159,7 @@ cython_debug/
 log/
 data/
 
+# uv
+.uv/
+uv.lock
+
