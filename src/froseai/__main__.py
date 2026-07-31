@@ -3,14 +3,9 @@ import os
 import logging
 import argparse
 
-#import threading
 import time
 
-#import torch.nn as nn
-#from torchvision import datasets
-#from torchvision.transforms import ToTensor
 from logging import basicConfig, getLogger
-#from multiprocessing import Process, set_start_method, get_start_method
 
 import uvicorn
 
@@ -18,8 +13,8 @@ formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=logging.INFO, format=formatter)
 logger = getLogger("Frose-Runner")
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from froseai import FroseAiServer #, FedDatasetsClassification, FroseArguments, FedAvg, FedValidator
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from froseai import FroseAiServer
 
 # FastAPIを別スレッドで起動
 def run_fastapi(app: uvicorn.Server):
