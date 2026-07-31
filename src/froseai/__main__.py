@@ -16,84 +16,66 @@ logger = getLogger("Frose-Runner")
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from froseai import FroseAiServer
 
-# FastAPIを別スレッドで起動
-def run_fastapi(app: uvicorn.Server):
-    app.run()
+from pydantic import Field, AliasChoices
+from pydantic_settings import BaseSettings, CliApp, SettingsConfigDict
 
-# ヘルプ関連の設定
-class ArgParseFormatter(
-    argparse.ArgumentDefaultsHelpFormatter,    # デフォルト値をヘルプに表示
-    argparse.RawDescriptionHelpFormatter,    # ヘルプ文章の改行を維持
-):
-    pass
-
-# メイン処理
-def main():
-    arg_parser = argparse.ArgumentParser(
-        # --helpを指定した際の説明文
-        prog = "froserun",    # 実行コマンド名
-        description = "FroseAi: 連合学習フレームワーク",
-        epilog = (    # ヘルプの末尾でGitHubのREADMEに飛ばす
+# 将来的な環境変数化の可能性も考慮してBaseSettingsを採用
+class ServerConfig(BaseSettings):
+    """FroseAi: 連合学習フレームワーク"""
+    # 先頭のコメントのみdocstringとして読み込まれヘルプの説明文となる
+    
+    model_config = SettingsConfigDict(
+        cli_prog_name = "froserun",    # 実行コマンド名
+        cli_epilog = (    # ヘルプの末尾でGitHubのREADMEに飛ばす
             "詳細な仕様は以下のリンクをご覧ください:\n"
             "https://github.com/rosso-ai/FroseAi/blob/main/README.md"
         ),
-        add_help = False, # ヘルプメッセージを日本語で表示するため個別定義
-        formatter_class = ArgParseFormatter
+        cli_kebab_case = True,    # スネークケース(log_dir)からケバブケース(--log-dir)に割り当て
+        cli_exit_on_error = True,    # 無効な引数が渡された場合にシステム終了する
+        case_sensitive = True,    # -hと-Hが衝突しないよう、大文字小文字を区別
     )
-    # ヘルプメッセージを日本語で表示するため個別定義
-    arg_parser.add_argument(
-        "-h",
-        "--help",
-        action = "help",
-        help="ヘルプメッセージを表示して終了"
-    )
+    
+    # 引数の定義
+    
     # ホスト、ポートはよく使うため短縮形あり
     # IPv6(::1)との解釈揺れを避けるため、127.0.0.1で指定
-    arg_parser.add_argument(
-        "-H",
-        "--host",
-        type = str,
+    host : str = Field(
+        validation_alias = AliasChoices("H", "host"),
         default = "127.0.0.1",
-        help="サーバに接続する際のホスト名"
+        description="サーバに接続する際のホスト名"
     )
     # 9200はElasticsearchのデフォルトポートのため衝突の可能性あり
     # FastAPIのデフォルトポートは8000なので、そちらに合わせる
-    arg_parser.add_argument(
-        "-p",
-        "--port",
-        type = int,
+    port : int = Field(
+        validation_alias = AliasChoices("p", "port"),
         default = 8000,
-        help = "サーバに接続する際のポート番号"
+        description = "サーバに接続する際のポート番号"
     )
     # モデル重みをやり取りするため、メッセージサイズ上限は1GBでとる
-    arg_parser.add_argument(
-        "--ws-max-size",
-        type = int,
+    ws_max_size : int = Field(
         default = 1000 * 1024 * 1024,
-        help = "サーバ⇔クライアント間のメッセージサイズ上限(bytes)"
+        description = "サーバ⇔クライアント間のメッセージサイズ上限(bytes)"
     )
     # ログやキャッシュのデフォルトパスは実行ファイルからの相対パスで定義
-    arg_parser.add_argument(
-        "--log-dir",
-        type=str,
+    log_dir : str = Field(
         default="./log",
-        help="ログの出力パス"
+        description="ログの出力パス"
     )
-    arg_parser.add_argument(
-        "--data-dir",
-        type=str,
+    data_dir : str = Field(
         default="./data",
-        help="データセットのキャッシュの出力パス"
+        description="データセットのキャッシュの出力パス"
     )
-    args = arg_parser.parse_args()
 
+# メイン処理
+def main():
+    config = CliApp.run(ServerConfig)
     # サーバの起動
     server = FroseAiServer(
-        host = args.host,
-        port = args.port,
-        ws_max_size = args.ws_max_size,
-        log_dir = args.log_dir,
-        data_dir = args.data_dir,
+        host = config.host,
+        port = config.port,
+        ws_max_size = config.ws_max_size,
+        log_dir = config.log_dir,
+        data_dir = config.data_dir,
         device = "cpu"
     )
     
