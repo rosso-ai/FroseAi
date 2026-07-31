@@ -1,43 +1,18 @@
-import sys
-import os
-
-import time
-
-import logging
-from logging import basicConfig, getLogger
-
+# Webサーバ起動用
 import uvicorn
-
-formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
-basicConfig(level=logging.INFO, format=formatter)
-logger = getLogger("Frose-Runner")
-
-from context import ServerConfig
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from froseai import FroseAiServer
-
+# 引数取得用
 from pydantic_settings import CliApp
+# 引数の定義
+from .context import ServerConfig
+# サーバ起動関数
+from .server import create_app
 
-# メイン処理
-def main():
-    config = CliApp.run(ServerConfig)
-    # サーバの起動
-    server = FroseAiServer(
-        host = config.host,
-        port = config.port,
-        ws_max_size = config.ws_max_size,
-        log_dir = config.log_dir,
-        data_dir = config.data_dir,
-        device = "cpu"
-    )
-    
-    # サーバをメインスレッドで起動
-    # コンテナはプロセスが終了すると停止してしまうため、
-    # 将来的なコンテナ化も見据えてフォアグラウンド方式を採用
-    # Uvicorn/FastAPIは標準でCtrl+C受信時に安全にクローズする仕組みがある
-    logger.info("FroseAI Server を起動します...")
-    server.run()
-
+# アプリケーションとWebサーバを分離するため、uvicorn.runで起動に変更
 if __name__ == "__main__":
-    main()
+    # 引数の取得
+    config = CliApp.run(ServerConfig)
+    # サーバインスタンスの生成
+    app = create_app(config)
+    # 生成したサーバインスタンスを渡して起動
+    uvicorn.run(app, host=config.host, port=config.port, ws_max_size=config.ws_max_size)
+

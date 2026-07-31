@@ -7,21 +7,21 @@ from torch import nn
 from omegaconf import OmegaConf
 from logging import getLogger
 from datetime import datetime
-from ..context import FroseArguments
-
+from ..context import *
 
 class FedValidator:
-    def __init__(self, conf: FroseArguments, test_data, log_dir, criterion):
-        self._conf = conf
+    def __init__(self, server_conf, app_conf, model, criterion, test_data):
+        self._conf = server_conf
         self._test_data = test_data
         self._metrics = []
         self._criterion = criterion
 
         dt_now = datetime.now()
-        job_name = self._conf.repo_name + "_" + dt_now.strftime('%Y%m%d_%H%M%S')
-        self._log_output_path = str(os.path.join(log_dir, job_name))
+        job_name = app_conf.repo_name + "_" + dt_now.strftime('%Y%m%d_%H%M%S')
+        self._log_output_path = str(os.path.join(server_conf.log_dir, job_name))
         os.makedirs(self._log_output_path, exist_ok=True)
-        OmegaConf.save(self._conf, os.path.join(self._log_output_path, "config.yml"))
+        
+        #OmegaConf.save(self._conf, os.path.join(self._log_output_path, "config.yml"))
 
         file_name = os.path.join(self._log_output_path, "metrics.csv")
         self._metrics_f = open(file_name, "w", encoding="utf-8")

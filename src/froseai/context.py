@@ -1,37 +1,50 @@
-from dataclasses import dataclass
-from omegaconf import OmegaConf
+
+from logging import INFO, basicConfig, Logger, getLogger
+
+# フォーマットされたロガーを返す
+def get_logger(name: str) -> Logger:
+    formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
+    basicConfig(level=INFO, format=formatter)
+    return getLogger(name)
 
 
-@dataclass
-class FroseArguments:
-    repo_name: str
-    server_url: str = "localhost:9200"
-    ws_max_size: int = 1048576000
+from enum import StrEnum
+from pydantic import BaseModel
+
+# サーバのステータス状態の列挙クラス
+class PhaseServer(StrEnum):
+    READY = "ready"    # クライアント起動前
+    TRAINING = "training"    # クライアント学習中
+    AGGREGATING = "aggregating"    # 学習結果集約中
+    COMPLETED = "completed"    # 正常終了
+    ERROR = "error"    # エラー終了
+
+# クライアントのステータス状態の列挙クラス
+class PhaseClient(StrEnum):
+    READY = "ready"    # クライアント起動前
+    TRAINING = "training"    # クライアント学習中
+    COMPLETED = "completed"    # クライアント学習終了
+    ERROR = "error"    # エラー終了
+
+class FroseArguments(BaseModel):
+    repo_name: str = "fedavg_cifar10_hetero1.0"
+    model_name: str = "logistic_regression"
     random_seed: int = 42
     device: str = "cpu"
     log_output_path: str = "./log"
-
-    # train args
     round: int = 10
     batch_size: int = 100
     inner_loop: int = 100
-
-    # data args
-    data_cache_dir: str = "./data"
-    partition_method: str = "hetero"
+    partition_method: str =  "hetero"
     partition_alpha: float =  10.0
-
-    # poc-mode
     worker_num: int = 1
 
-    @classmethod
-    def from_yml(cls, yml_path: str):
-        loaded = OmegaConf.load(yml_path)
-        read_conf = FroseArguments(**loaded)
+class ClientInfo(BaseModel):
+    status: PhaseClient
+    round: int
+    last_seen: float    # 最終アクセス時刻
 
-        base_conf = OmegaConf.structured(FroseArguments)
-        merged = OmegaConf.merge(base_conf, read_conf)
-        return cls(**merged)
+
 
 from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings, CliApp, SettingsConfigDict
@@ -95,7 +108,6 @@ class LogisticRegression(nn.Module):
         outputs = self.linear(x)
         return outputs
 
-from enum import StrEnum
 
 # モデル生成用のファクトリ関数
 # torchvision.modelsに含まれていないモデルを利用したい場合はここに登録
@@ -103,23 +115,13 @@ MODEL_REGISTRY = {
     "logistic_regression": LogisticRegression,
 }
 
-# サーバのステータス状態の列挙クラス
-class PhaseStatus(StrEnum):
-    UNINITIALIZED = "uninitialized"    # サーバ起動前
-    READY = "ready"    # クライアント起動前
-    TRAINING = "training"    # クライアント学習中
-    AGGREGATING = "aggregating"    # 学習結果集約中
-    COMPLETED = "completed"    # 正常終了
-    ERROR = "error"    # エラー終了
-
-from pydantic import BaseModel
 
 # RestAPI用のクラスオブジェクト
 # データ検証の自動化のため、BaseModelを継承
 # GET STATUS
 class ResponseGetStatus(BaseModel):
     # 列挙クラスで取りうる値を定義
-    status: PhaseStatus    # ステータス
+    status: PhaseServer    # ステータス
     total_round: int    # 総ラウンド数
     current_round: int    # 現在のラウンド数
     total_clients: int    # 総クライアント数

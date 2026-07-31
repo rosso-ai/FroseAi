@@ -6,7 +6,7 @@ from logging import getLogger
 from typing import Dict, Optional
 from abc import ABCMeta, abstractmethod
 from threading import Thread
-from ..context import FroseArguments
+from ..context import *
 from ..datasets import FedDatasetsClassification
 from ..validator import FedValidator
 
@@ -14,16 +14,11 @@ from ..validator import FedValidator
 class FroseAiAggFrame(metaclass=ABCMeta):
     def __init__(
         self,
-        host = "localhost",
-        port = 8000,
-        ws_max_size = 1000 * 1024 * 1024,
-        log_dir = "./log",
-        data_dir = "./data",
-        device="cpu",
+        server_conf,
         **kwargs
     ):
-        self._conf : FroseArguments | None = None
-        self._device = device
+        self._conf = None
+        self._server_conf = server_conf
         self._round = 0
         self._model = None
         self._rsp_messages = {"model": None}
@@ -35,37 +30,39 @@ class FroseAiAggFrame(metaclass=ABCMeta):
         self._aggregator = None
         self._received = []
         self._snd_q = {}
-        self._log_dir = log_dir
-        self._data_dir = data_dir
-        self._host = host
-        self._port = port
+        self._log_dir = server_conf.log_dir
+        self._data_dir = server_conf.data_dir
+        self._host = server_conf.host
+        self._port = server_conf.port
 
         self._logger = getLogger("FroseAi-ServerAgg")
         self._logger.info("Initialize!!")
 
-    def start(self):
+    def set_app_conf(self, app_conf, model, criterion, train_data, valid_data):
         # コンフィグを後から読み込ませる形にしたため、
         # 学習関連の初期化を一部移動
-        
+        self._device = app_conf.device
+        self._model = model
+        self._conf = app_conf
         # データセットの分割
         fed_datasets = FedDatasetsClassification(
-            self._conf.worker_num,
-            self._conf.batch_size,
-            self._conf.inner_loop,
-            self._conf.partition_method,
-            self._conf.partition_alpha,
-            self._train_data,
-            self._valid_data,
+            app_conf.worker_num,
+            app_conf.batch_size,
+            app_conf.inner_loop,
+            app_conf.partition_method,
+            app_conf.partition_alpha,
+            train_data,
+            valid_data,
             10
         )
         self._fed_data = fed_datasets
         # いずれは外に出すが一旦Aggregator内で定義する
-        self._validator = FedValidator(self._conf, fed_datasets.valid_data_loader, self._log_dir, self._criterion)
+        self._validator = FedValidator(self._server_conf, app_conf, model, criterion, fed_datasets.valid_data_loader)
         # 途中のクライアント増減など将来的な拡張性を意識して、
         # キュー管理をリストから辞書型に変更
         self._received = []
         self._snd_q = {}
-        for idx in range(self.client_num):
+        for idx in range(app_conf.worker_num):
             self._flag_client_uploaded_round.append(self._round)
             self._received.append({})
             self._snd_q[idx] = Queue()
