@@ -14,13 +14,12 @@ import time
 import torch
 import uvicorn
 import inspect
-from enum import StrEnum
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status, Response
 from fastapi.middleware.cors import CORSMiddleware
 from logging import INFO, basicConfig, getLogger
 from multiprocessing import Process, set_start_method, get_start_method
-from pydantic import BaseModel
 from typing import Optional
+from context import *
 from .aggregator import FedAvgAggregator
 from .context import FroseArguments
 from .pb.froseai_pb2 import FroseAiPiece, FroseAiParams, FroseAiStatus
@@ -31,80 +30,6 @@ from torchvision.transforms import ToTensor
 
 formatter = '%(asctime)s [%(name)s] %(levelname)s :  %(message)s'
 basicConfig(level=INFO, format=formatter)
-
-class LogisticRegression(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(LogisticRegression, self).__init__()
-        self.linear = nn.Linear(input_dim, output_dim)
-
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        outputs = self.linear(x)
-        return outputs
-
-# モデル生成用のファクトリ関数
-# torchvision.modelsに含まれていないモデルを利用したい場合はここに登録
-MODEL_REGISTRY = {
-    "logistic_regression": LogisticRegression,
-}
-
-# サーバのステータス状態の列挙クラス
-class PhaseStatus(StrEnum):
-    UNINITIALIZED = "uninitialized"    # サーバ起動前
-    READY = "ready"    # クライアント起動前
-    TRAINING = "training"    # クライアント学習中
-    AGGREGATING = "aggregating"    # 学習結果集約中
-    COMPLETED = "completed"    # 正常終了
-    ERROR = "error"    # エラー終了
-
-# RestAPI用のクラスオブジェクト
-# データ検証の自動化のため、BaseModelを継承
-# GET STATUS
-class ResponseGetStatus(BaseModel):
-    # 列挙クラスで取りうる値を定義
-    status: PhaseStatus    # ステータス
-    total_round: int    # 総ラウンド数
-    current_round: int    # 現在のラウンド数
-    total_clients: int    # 総クライアント数
-    complete_clients: int    # 学習結果を返したクライアント数
-    uptime_seconds: float    # 連続稼働時間(秒)
-    # 文字列またはNone、指定なしの場合はNone
-    latest_metrics: str | None = None    # 最新のメトリクス値
-
-# GET HEALTHZ
-class ResponseGetHealthz(BaseModel):
-    status: str
-
-# GET CLIENT LIST
-class ResponseGetClientList(BaseModel):
-    total_clients: int    # 総クライアント数
-    current_round: int    # 現在のラウンド数
-    clients: dict    # クライアントのリスト
-
-# GET CLIENT STATUS
-class ResponseGetClientStatus(BaseModel):
-    client_id: str    # クライアントの識別ID
-    status: str    # クライアントのステータス
-    last_seen: float    # 最終アクセス時刻
-    current_round: int    # 現在のラウンド数
-
-# POST SESSION START
-class RequestPostSessionStart(BaseModel):
-    repo_name: str = "fedavg_cifar10_hetero1.0"
-    model_name: str = "logistic_regression"
-    model_args: dict = {"input_dim": 784, "output_dim": 10}
-    dataset_name: str = "EMNIST"
-    dataset_args: dict = {"split": "digits"}
-    criterion_name: str = "CrossEntropyLoss"
-    criterion_args: dict = {}
-    random_seed: int = 0
-    device: str = "cpu"
-    round: int = 1
-    batch_size: int = 100
-    inner_loop: int = 1
-    partition_method: str = "hetero"
-    partition_alpha: float = 1.0
-    worker_num: int = 1
 
 # サーバ側(Aggregator)⇔クライアント側(WebSocket)のゲートウェイクラス
 class FroseAiGateway:
